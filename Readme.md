@@ -14,6 +14,9 @@ useEffect(() => {
     // use response
 }, [status, response]);
 ```
+You can also pass ```true``` as a second argument to disable caching and force a re-fetch every time:
+
+```const { status, response } = useRequest(getList, true);```
 
 # useQueries hook
 
