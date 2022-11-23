@@ -1,10 +1,27 @@
+# useRequest hook
+
+Pass it a Promise function that performs a fetch call and it will track its lifecycle and cache the results
+
+Initialize the hook:
+
+```const { status, response } = useRequest(getList);```
+
+And use the effect:
+
+```
+useEffect(() => {
+    if (!response || !status || status < 2) return;
+    // use response
+}, [status, response]);
+```
+
 # useQueries hook
 
 Every time a fetch call is made to the API from React, keep track of it with this hook. This way, you can cancel a long fetch before you start another, so your UI doesn't flicker when an old, obsolete fetch completes.
 
 In your component, initialize the query list like any React hook:
 
-     const queries = useQueries();
+```const queries = useQueries();```
 
 Then keep track of any fetch calls with it:
 
