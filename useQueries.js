@@ -1,5 +1,5 @@
 import { useState } from "react";
-export default function useQueue() {
+export default function useQueries() {
     const [list, setList] = useState([]);
     return {
         list,
