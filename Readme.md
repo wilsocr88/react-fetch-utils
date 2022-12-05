@@ -1,10 +1,29 @@
+# FetchPromise
+
+```
+import FetchPromise from './FetchPromise';
+export function getThingFromAPI() {
+    return FetchPromise({
+        url: "https://api.example.com/2/things/search",
+        method: "POST",
+        body: {
+            // ...
+        }
+    });
+}
+
+// In component:
+
+const { status, response } = useRequest(getThingFromAPI);
+```
+
 # useRequest hook
 
 Pass it a Promise function that performs a fetch call and it will track its lifecycle and cache the results
 
 Initialize the hook:
 
-```const { status, response } = useRequest(getList);```
+`const { status, response } = useRequest(getList);`
 
 And use the effect:
 
@@ -14,11 +33,12 @@ useEffect(() => {
     // use response
 }, [status, response]);
 ```
-You can also pass ```true``` as a second argument to disable caching and force a re-fetch every time:
 
-```const { status, response } = useRequest(getList, true);```
+You can also pass `true` as a second argument to disable caching and force a re-fetch every time:
 
-The ```useRequest``` hook makes use of the ```useQueries``` hook to track its fetch queries.
+`const { status, response } = useRequest(getList, true);`
+
+The `useRequest` hook makes use of the `useQueries` hook to track its fetch queries. If you wish, you may use it directly:
 
 # useQueries hook
 
@@ -26,21 +46,21 @@ Every time a fetch call is made to the API from React, keep track of it with thi
 
 In your component, initialize the query list like any React hook:
 
-```const queries = useQueries();```
+`const queries = useQueries();`
 
 Then keep track of any fetch calls with it:
 
 1. Cancel all before you fetch:
 
-```queries.cancelAll();```
-     
+`queries.cancelAll();`
+
 2. Do your fetch inside an async promise function which has an AbortController.abort() cancellation method, and return it directly to a variable:
 
-```let query = getThingsFromAPI();```
-     
+`let query = getThingsFromAPI();`
+
 3. Keep track of it in the query list:
 
-```queries.add(query);```
+`queries.add(query);`
 
 4. Remove it from the list when it completes:
 
