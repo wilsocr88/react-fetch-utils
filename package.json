@@ -1,0 +1,19 @@
+{
+  "name": "react-fetch-tools",
+  "version": "0.0.1",
+  "description": "React fetch tools",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wilsocr88/useQueue.git"
+  },
+  "author": "Craig Wilson <wilsocr88@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/wilsocr88/useQueue/issues"
+  },
+  "homepage": "https://github.com/wilsocr88/useQueue#readme"
+}
