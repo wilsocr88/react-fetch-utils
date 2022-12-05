@@ -8,12 +8,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wilsocr88/useQueue.git"
+    "url": "git+https://github.com/wilsocr88/react-fetch-tools.git"
   },
   "author": "Craig Wilson <wilsocr88@gmail.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/wilsocr88/useQueue/issues"
+    "url": "https://github.com/wilsocr88/react-fetch-tools/issues"
   },
-  "homepage": "https://github.com/wilsocr88/useQueue#readme"
+  "homepage": "https://github.com/wilsocr88/react-fetch-tools#readme"
 }
