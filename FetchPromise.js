@@ -1,16 +1,26 @@
-const APIRequest = params => {
+const FetchPromiseParams = {
+    url: String,
+    method: String,
+    body: Object || null,
+    respType: String || null,
+};
+
+/**
+ * @param {FetchPromiseParams} params
+ * @returns {FetchPromise} A promise with a .cancel() method which calls AbortController.abort()
+ */
+const FetchPromise = params => {
     const controller = new AbortController();
     const signal = controller.signal;
     const promise = new Promise(async function (resolve, reject) {
-        const { apiUrl } = window["runConfig"];
         const headers = {
             Accept: params.respType === "raw" ? "blob" : "application/json",
             "Content-Type": "application/json",
         };
-        await fetch(apiUrl + params.url, {
+        await fetch(params.url, {
             method: params.method,
             signal,
-            headers: headers,
+            headers,
             body: JSON.stringify(params.body),
         })
             .then(response => {
@@ -35,4 +45,4 @@ const APIRequest = params => {
     promise.cancel = () => controller.abort();
     return promise;
 };
-export default APIRequest;
+export default FetchPromise;
