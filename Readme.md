@@ -1,5 +1,5 @@
 # FetchPromise
-
+Usage:
 ```
 import FetchPromise from './FetchPromise';
 export function getThingFromAPI() {
@@ -38,9 +38,10 @@ You can also pass `true` as a second argument to disable caching and force a re-
 
 `const { status, response } = useRequest(getList, true);`
 
-The `useRequest` hook makes use of the `useQueries` hook to track its fetch queries. If you wish, you may use it directly:
+__Note:__ The `useRequest` hook makes use of the `useQueries` hook to track its fetch queries. If you wish, you may use it directly:
 
 # useQueries hook
+__Note:__ This hook is used within `useRequest`.
 
 Every time a fetch call is made to the API from React, keep track of it with this hook. This way, you can cancel a long fetch before you start another, so your UI doesn't flicker when an old, obsolete fetch completes.
 
