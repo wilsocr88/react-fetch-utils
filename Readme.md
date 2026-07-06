@@ -18,11 +18,15 @@ npm install react-fetch-utils
 ```ts
 import {
     FetchPromise,
+    createFetchClient,
     useQueries,
     useRequest,
     statusEnum,
     type CancellablePromise,
+    type FetchClientDefaults,
+    type FetchPromiseError,
     type FetchPromiseParams,
+    type FetchRequestConfig,
     type Status,
 } from "react-fetch-utils";
 ```
@@ -30,11 +34,15 @@ import {
 ## Exports
 
 - `FetchPromise`
+- `createFetchClient`
 - `useQueries`
 - `useRequest`
 - `statusEnum`
 - `CancellablePromise` (type)
+- `FetchClientDefaults` (type)
+- `FetchPromiseError` (type)
 - `FetchPromiseParams` (type)
+- `FetchRequestConfig` (type)
 - `Status` (type)
 
 ## Quick Start
@@ -86,22 +94,49 @@ function FetchPromise<T = unknown>(
 type FetchPromiseParams = {
     url: string;
     method: string;
-    body?: object | null;
+    body?: unknown;
     respType?: "raw" | "json" | null;
+    headers?: HeadersInit | Record<string, string>;
+    timeoutMs?: number;
+    baseUrl?: string;
+    includeContentType?: boolean;
+    parseAs?: "json" | "raw" | "text" | "response";
+    onRequest?: (
+        request: FetchRequestConfig,
+    ) => FetchRequestConfig | void | Promise<FetchRequestConfig | void>;
+    validateStatus?: (status: number, response: Response) => boolean;
+    getAuthToken?: () => string | null | undefined | Promise<string | null | undefined>;
+    allowBodyForGetHead?: boolean;
 };
 ```
 
 Behavior:
 
-- Sends JSON body with `JSON.stringify(params.body)`.
-- Sends headers:
-    - `Accept: application/json` (or `blob` when `respType: "raw"`)
-    - `Content-Type: application/json`
-- Resolves with `response.json()` by default.
-- Resolves with `response.blob()` when `respType: "raw"`.
-- Rejects `401` with `{ reason: "Unauthorized", details: Response }`.
-- Rejects all other failures as `{ reason: "Unknown", details: error }`.
-- Returns a promise with `.cancel()` that aborts the underlying request.
+- Backward compatible with existing `respType: "json" | "raw"`.
+- New parsing modes via `parseAs`:
+    - `json` (default)
+    - `raw` (`Blob`)
+    - `text` (`string`)
+    - `response` (`Response`)
+- Supports request timeout with `timeoutMs` using `AbortController`.
+- Supports base URL joining with `baseUrl`.
+- Supports request customization with `headers`, `onRequest`, `validateStatus`, and `getAuthToken`.
+- `Accept` is set automatically only when caller did not provide it.
+- `Content-Type: application/json` is added only when:
+    - there is a body,
+    - method is `POST`/`PUT`/`PATCH`,
+    - `includeContentType !== false`,
+    - caller did not already provide `Content-Type`.
+- Request body behavior:
+    - `GET`/`HEAD` bodies are not sent by default.
+    - use `allowBodyForGetHead: true` to allow body on `GET`/`HEAD`.
+    - non-JSON bodies (`FormData`, `Blob`, `string`, `URLSearchParams`, etc.) are passed through unchanged.
+    - plain objects/values are JSON-stringified when body is allowed.
+- Error model:
+    - `401` rejects with `{ reason: "Unauthorized", details: Response }`
+    - timeout abort rejects with `{ reason: "Timeout", details: ... }`
+    - other failures reject with `{ reason: "Unknown", details: ... }`
+- Returned promise remains cancellable with `.cancel()` and is safe to call repeatedly.
 
 Example (JSON):
 
@@ -112,9 +147,41 @@ type User = { id: number; name: string };
 
 export function getUser() {
     return FetchPromise<User>({
-        url: "/api/user",
+        url: "/user",
         method: "POST",
+        baseUrl: "https://api.example.com/v1",
         body: { includeDetails: true },
+        timeoutMs: 8000,
+        getAuthToken: () => localStorage.getItem("token"),
+    });
+}
+```
+
+Example (`text` parse mode + custom status validation):
+
+```ts
+import { FetchPromise } from "react-fetch-utils";
+
+export function getHealth() {
+    return FetchPromise<string>({
+        url: "/health",
+        method: "GET",
+        parseAs: "text",
+        validateStatus: status => status >= 200 && status < 500,
+    });
+}
+```
+
+Example (full `Response` mode):
+
+```ts
+import { FetchPromise } from "react-fetch-utils";
+
+export function getRawResponse() {
+    return FetchPromise<Response>({
+        url: "/diagnostics",
+        method: "GET",
+        parseAs: "response",
     });
 }
 ```
@@ -132,6 +199,64 @@ const download = FetchPromise<Blob>({
 
 // Cancel if no longer needed
 download.cancel();
+```
+
+### `createFetchClient`
+
+Creates a reusable request function with merged defaults so app code does not need a custom API wrapper utility.
+
+Signature:
+
+```ts
+function createFetchClient(
+    defaults?: FetchClientDefaults,
+): <T = unknown>(params: FetchPromiseParams) => CancellablePromise<T>;
+```
+
+Example (replace a custom `APIRequest` utility):
+
+```ts
+import { createFetchClient } from "react-fetch-utils";
+
+export const apiRequest = createFetchClient({
+    baseUrl: "https://api.example.com/v1",
+    timeoutMs: 10000,
+    headers: {
+        "X-App-Client": "web",
+    },
+    getAuthToken: async () => localStorage.getItem("access_token"),
+    validateStatus: status => status >= 200 && status < 300,
+    onRequest: request => {
+        request.headers.set("X-Trace-Id", crypto.randomUUID());
+    },
+});
+
+export const getProfile = () =>
+    apiRequest<{ id: string; name: string }>({
+        url: "/profile",
+        method: "GET",
+        parseAs: "json",
+    });
+
+export const downloadReport = () =>
+    apiRequest<Blob>({
+        url: "/reports/monthly",
+        method: "GET",
+        parseAs: "raw",
+    });
+```
+
+Example (`FormData` upload without forced JSON content-type):
+
+```ts
+const formData = new FormData();
+formData.append("file", file);
+
+apiRequest({
+    url: "/upload",
+    method: "POST",
+    body: formData,
+});
 ```
 
 ### `useQueries`
@@ -295,10 +420,42 @@ const request: FetchPromiseParams = {
     url: "/api/items",
     method: "POST",
     body: { page: 1 },
-    respType: "json",
+    headers: { Authorization: "Bearer token" },
+    timeoutMs: 5000,
+    parseAs: "json",
 };
 
 FetchPromise(request);
+```
+
+### `FetchPromiseError` (type)
+
+```ts
+type FetchPromiseError = {
+    reason: "Unauthorized" | "Timeout" | "Unknown";
+    details: unknown;
+    status?: number;
+    response?: Response;
+    originalError?: unknown;
+};
+```
+
+### `FetchRequestConfig` (type)
+
+```ts
+type FetchRequestConfig = {
+    url: string;
+    init: RequestInit;
+    headers: Headers;
+};
+```
+
+### `FetchClientDefaults` (type)
+
+```ts
+type FetchClientDefaults = Omit<FetchPromiseParams, "url" | "method"> & {
+    method?: string;
+};
 ```
 
 ### `Status` (type)
@@ -320,6 +477,7 @@ console.log(statusEnum[status]); // "fetching"
 
 - `useRequest` is built on top of `useQueries`.
 - For errors, attach `.catch(...)` where you create and consume `CancellablePromise` requests.
+- `respType` is still supported for backward compatibility; prefer `parseAs` in new code.
 
 ## License
 
