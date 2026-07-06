@@ -1,10 +1,16 @@
 {
   "name": "react-fetch-tools",
-  "version": "0.0.1",
-  "description": "React fetch tools",
-  "main": "index.js",
+  "version": "0.1.0",
+  "description": "Lightweight React hooks and utilities for fetch requests with cancellation support",
+  "main": "./dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run typecheck && npm run build",
+    "prepublishOnly": "npm run typecheck && npm run build"
   },
   "repository": {
     "type": "git",
@@ -12,8 +18,49 @@
   },
   "author": "Craig Wilson <wilsocr88@gmail.com>",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "bugs": {
     "url": "https://github.com/wilsocr88/react-fetch-tools/issues"
   },
-  "homepage": "https://github.com/wilsocr88/react-fetch-tools#readme"
+  "homepage": "https://github.com/wilsocr88/react-fetch-tools#readme",
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "jsdom": "^29.1.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "react": ">=16.8.0"
+  },
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "react",
+    "fetch",
+    "hooks",
+    "cancel",
+    "abort",
+    "request"
+  ]
 }

@@ -1,19 +1,23 @@
-const FetchPromiseParams = {
-    url: String,
-    method: String,
-    body: Object || null,
-    respType: String || null,
-};
+export interface FetchPromiseParams {
+    url: string;
+    method: string;
+    body?: object | null;
+    respType?: "raw" | "json" | null;
+}
+
+export interface CancellablePromise<T = unknown> extends Promise<T> {
+    cancel: () => void;
+}
 
 /**
- * @param {FetchPromiseParams} params
- * @returns {FetchPromise} A promise with a .cancel() method which calls AbortController.abort()
+ * @param params - Request configuration
+ * @returns A promise with a `.cancel()` method that calls `AbortController.abort()`
  */
-const FetchPromise = params => {
+const FetchPromise = <T = unknown>(params: FetchPromiseParams): CancellablePromise<T> => {
     const controller = new AbortController();
     const signal = controller.signal;
-    const promise = new Promise(async function (resolve, reject) {
-        const headers = {
+    const promise = new Promise<T>(async function (resolve, reject) {
+        const headers: Record<string, string> = {
             Accept: params.respType === "raw" ? "blob" : "application/json",
             "Content-Type": "application/json",
         };
@@ -28,21 +32,22 @@ const FetchPromise = params => {
                     reject({ reason: "Unauthorized", details: response });
                 }
                 if (!response.ok) {
-                    throw Error(response);
+                    throw new Error(response.statusText);
                 }
                 if (params.respType === "raw") {
-                    return response.blob();
+                    return response.blob() as unknown as T;
                 }
-                return response.json();
+                return response.json() as Promise<T>;
             })
             .then(data => {
-                resolve(data);
+                if (data !== undefined) resolve(data);
             })
             .catch(error => {
                 reject({ reason: "Unknown", details: error });
             });
-    });
+    }) as CancellablePromise<T>;
     promise.cancel = () => controller.abort();
     return promise;
 };
+
 export default FetchPromise;
