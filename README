@@ -114,28 +114,28 @@ Behavior:
 
 - Backward compatible with existing `respType: "json" | "raw"`.
 - New parsing modes via `parseAs`:
-    - `json` (default)
-    - `raw` (`Blob`)
-    - `text` (`string`)
-    - `response` (`Response`)
+  - `json` (default)
+  - `raw` (`Blob`)
+  - `text` (`string`)
+  - `response` (`Response`)
 - Supports request timeout with `timeoutMs` using `AbortController`.
 - Supports base URL joining with `baseUrl`.
 - Supports request customization with `headers`, `onRequest`, `validateStatus`, and `getAuthToken`.
 - `Accept` is set automatically only when caller did not provide it.
 - `Content-Type: application/json` is added only when:
-    - there is a body,
-    - method is `POST`/`PUT`/`PATCH`,
-    - `includeContentType !== false`,
-    - caller did not already provide `Content-Type`.
+  - there is a body,
+  - method is `POST`/`PUT`/`PATCH`,
+  - `includeContentType !== false`,
+  - caller did not already provide `Content-Type`.
 - Request body behavior:
-    - `GET`/`HEAD` bodies are not sent by default.
-    - use `allowBodyForGetHead: true` to allow body on `GET`/`HEAD`.
-    - non-JSON bodies (`FormData`, `Blob`, `string`, `URLSearchParams`, etc.) are passed through unchanged.
-    - plain objects/values are JSON-stringified when body is allowed.
+  - `GET`/`HEAD` bodies are not sent by default.
+  - use `allowBodyForGetHead: true` to allow body on `GET`/`HEAD`.
+  - non-JSON bodies (`FormData`, `Blob`, `string`, `URLSearchParams`, etc.) are passed through unchanged.
+  - plain objects/values are JSON-stringified when body is allowed.
 - Error model:
-    - `401` rejects with `{ reason: "Unauthorized", details: Response }`
-    - timeout abort rejects with `{ reason: "Timeout", details: ... }`
-    - other failures reject with `{ reason: "Unknown", details: ... }`
+  - `401` rejects with `{ reason: "Unauthorized", details: Response }`
+  - timeout abort rejects with `{ reason: "Timeout", details: ... }`
+  - other failures reject with `{ reason: "Unknown", details: ... }`
 - Returned promise remains cancellable with `.cancel()` and is safe to call repeatedly.
 
 Example (JSON):
