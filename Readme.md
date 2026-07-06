@@ -1,11 +1,11 @@
-# react-fetch-tools
+# react-fetch-utils
 
 Lightweight React hooks and utilities for fetch requests with cancellation support.
 
 ## Install
 
 ```bash
-npm install react-fetch-tools
+npm install react-fetch-utils
 ```
 
 ## Requirements
@@ -24,7 +24,7 @@ import {
     type CancellablePromise,
     type FetchPromiseParams,
     type Status,
-} from "react-fetch-tools";
+} from "react-fetch-utils";
 ```
 
 ## Exports
@@ -41,7 +41,7 @@ import {
 
 ```tsx
 import { useEffect } from "react";
-import { FetchPromise, useRequest } from "react-fetch-tools";
+import { FetchPromise, useRequest } from "react-fetch-utils";
 
 type Todo = { id: number; title: string; completed: boolean };
 
@@ -75,7 +75,9 @@ Creates a cancellable promise around `fetch`.
 Signature:
 
 ```ts
-function FetchPromise<T = unknown>(params: FetchPromiseParams): CancellablePromise<T>
+function FetchPromise<T = unknown>(
+    params: FetchPromiseParams,
+): CancellablePromise<T>;
 ```
 
 `FetchPromiseParams`:
@@ -93,8 +95,8 @@ Behavior:
 
 - Sends JSON body with `JSON.stringify(params.body)`.
 - Sends headers:
-  - `Accept: application/json` (or `blob` when `respType: "raw"`)
-  - `Content-Type: application/json`
+    - `Accept: application/json` (or `blob` when `respType: "raw"`)
+    - `Content-Type: application/json`
 - Resolves with `response.json()` by default.
 - Resolves with `response.blob()` when `respType: "raw"`.
 - Rejects `401` with `{ reason: "Unauthorized", details: Response }`.
@@ -104,7 +106,7 @@ Behavior:
 Example (JSON):
 
 ```ts
-import { FetchPromise } from "react-fetch-tools";
+import { FetchPromise } from "react-fetch-utils";
 
 type User = { id: number; name: string };
 
@@ -120,7 +122,7 @@ export function getUser() {
 Example (raw `Blob` + cancellation):
 
 ```ts
-import { FetchPromise } from "react-fetch-tools";
+import { FetchPromise } from "react-fetch-utils";
 
 const download = FetchPromise<Blob>({
     url: "/api/report",
@@ -144,14 +146,14 @@ function useQueries(): {
     cancelAll: () => void;
     add: (query: CancellablePromise) => void;
     remove: (query: CancellablePromise) => void;
-}
+};
 ```
 
 Example:
 
 ```tsx
 import { useEffect } from "react";
-import { FetchPromise, useQueries } from "react-fetch-tools";
+import { FetchPromise, useQueries } from "react-fetch-utils";
 
 export function SearchBox({ term }: { term: string }) {
     const queries = useQueries();
@@ -194,8 +196,8 @@ Signature:
 ```ts
 function useRequest<T = unknown>(
     fetchPromise: (() => CancellablePromise<T>) | null | undefined,
-    disableCache?: boolean
-): { status: Status; response: T | null }
+    disableCache?: boolean,
+): { status: Status; response: T | null };
 ```
 
 Behavior:
@@ -210,7 +212,7 @@ Example (cached by default):
 
 ```tsx
 import { useEffect } from "react";
-import { FetchPromise, useRequest, statusEnum } from "react-fetch-tools";
+import { FetchPromise, useRequest, statusEnum } from "react-fetch-utils";
 
 type Profile = { name: string; role: string };
 
@@ -254,7 +256,7 @@ const statusEnum = {
 Example:
 
 ```ts
-import { statusEnum, type Status } from "react-fetch-tools";
+import { statusEnum, type Status } from "react-fetch-utils";
 
 function labelFor(status: Status) {
     return statusEnum[status];
@@ -272,7 +274,7 @@ type CancellablePromise<T = unknown> = Promise<T> & {
 Example:
 
 ```ts
-import { type CancellablePromise, FetchPromise } from "react-fetch-tools";
+import { type CancellablePromise, FetchPromise } from "react-fetch-utils";
 
 const req: CancellablePromise<{ ok: boolean }> = FetchPromise({
     url: "/api/health",
@@ -287,7 +289,7 @@ req.cancel();
 Example:
 
 ```ts
-import { type FetchPromiseParams, FetchPromise } from "react-fetch-tools";
+import { type FetchPromiseParams, FetchPromise } from "react-fetch-utils";
 
 const request: FetchPromiseParams = {
     url: "/api/items",
@@ -308,7 +310,7 @@ type Status = 0 | 1 | 2;
 Example:
 
 ```ts
-import { type Status, statusEnum } from "react-fetch-tools";
+import { type Status, statusEnum } from "react-fetch-utils";
 
 const status: Status = 1;
 console.log(statusEnum[status]); // "fetching"
