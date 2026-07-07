@@ -1,6 +1,6 @@
 # react-fetch-utils
-[![license](https://img.shields.io/npm/l/react-fetch-utils)]
-[![version](https://img.shields.io/npm/v/react-fetch-utils)]
+![license](https://img.shields.io/npm/l/react-fetch-utils)
+![version](https://img.shields.io/npm/v/react-fetch-utils)
 
 Lightweight React hooks and utilities for fetch requests with cancellation support.
 
