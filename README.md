@@ -484,3 +484,7 @@ console.log(statusEnum[status]); // "fetching"
 ## License
 
 MIT
+
+## CONTRIBUTING
+
+See [CONTRIBUTING](https://github.com/wilsocr88/react-fetch-utils/blob/master/CONTRIBUTING.md)
