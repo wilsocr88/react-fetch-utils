@@ -50,21 +50,36 @@ declare function useQueries(): {
  * 0 = "idle"
  * 1 = "fetching"
  * 2 = "done"
+ * 3 = "error"
  */
 declare const statusEnum: {
     readonly 0: "idle";
     readonly 1: "fetching";
     readonly 2: "done";
+    readonly 3: "error";
 };
-type Status = 0 | 1 | 2;
-/**
- * @param fetchPromise - A factory function that returns a `CancellablePromise`
- * @param disableCache - Disable cache and force a re-fetch every time this hook runs
- * @returns `{ status, response }` where status is 0 (idle), 1 (fetching), or 2 (done)
- */
-declare const useRequest: <T = unknown>(fetchPromise: (() => CancellablePromise<T>) | null | undefined, disableCache?: boolean) => {
+type Status = 0 | 1 | 2 | 3;
+type UseRequestOptions = {
+    disableCache?: boolean;
+    cacheKey?: string;
+    enabled?: boolean;
+    deps?: ReadonlyArray<unknown>;
+    staleTimeMs?: number;
+    dedupe?: boolean;
+};
+type UseRequestResult<T> = {
     status: Status;
     response: T | null;
+    error: unknown;
+    refetch: () => void;
+    cancel: () => void;
+    reset: () => void;
 };
+/**
+ * @param fetchPromise - A factory function that returns a `CancellablePromise`
+ * @param disableCacheOrOptions - Disable cache via boolean (legacy) or provide options
+ * @returns Hook state and controls for request status, response, and retries
+ */
+declare const useRequest: <T = unknown>(fetchPromise: (() => CancellablePromise<T>) | null | undefined, disableCacheOrOptions?: boolean | UseRequestOptions) => UseRequestResult<T>;
 
-export { type CancellablePromise, type FetchClientDefaults, FetchPromise, type FetchPromiseError, type FetchPromiseParams, type FetchRequestConfig, type Status, createFetchClient, statusEnum, useQueries, useRequest };
+export { type CancellablePromise, type FetchClientDefaults, FetchPromise, type FetchPromiseError, type FetchPromiseParams, type FetchRequestConfig, type Status, type UseRequestOptions, type UseRequestResult, createFetchClient, statusEnum, useQueries, useRequest };

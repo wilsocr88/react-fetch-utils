@@ -266,22 +266,36 @@ var FetchPromise_default = FetchPromise;
 // src/useQueries.ts
 var import_react = require("react");
 function useQueries() {
+  const listRef = (0, import_react.useRef)([]);
   const [list, setList] = (0, import_react.useState)([]);
+  const syncList = (0, import_react.useCallback)(() => {
+    setList([...listRef.current]);
+  }, []);
+  const cancelAll = (0, import_react.useCallback)(() => {
+    if (listRef.current.length === 0) return;
+    listRef.current.forEach((query) => query.cancel());
+    listRef.current = [];
+    syncList();
+  }, [syncList]);
+  const add = (0, import_react.useCallback)(
+    (query) => {
+      listRef.current = [...listRef.current, query];
+      syncList();
+    },
+    [syncList]
+  );
+  const remove = (0, import_react.useCallback)(
+    (query) => {
+      listRef.current = listRef.current.filter((activeQuery) => activeQuery !== query);
+      syncList();
+    },
+    [syncList]
+  );
   return {
     list,
-    cancelAll: () => {
-      const tempList = [...list];
-      if (tempList.length > 0) {
-        tempList.forEach((q) => q.cancel());
-        setList([]);
-      }
-    },
-    add: (query) => {
-      setList((prev) => [...prev, query]);
-    },
-    remove: (query) => {
-      setList((prev) => prev.filter((q) => q !== query));
-    }
+    cancelAll,
+    add,
+    remove
   };
 }
 
@@ -290,33 +304,146 @@ var import_react2 = require("react");
 var statusEnum = {
   0: "idle",
   1: "fetching",
-  2: "done"
+  2: "done",
+  3: "error"
 };
-var useRequest = (fetchPromise, disableCache = false) => {
-  const cache = (0, import_react2.useRef)({});
-  const queries = useQueries();
+var hashString = (value) => {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = hash * 33 ^ value.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+};
+var resolveCacheKey = (fetchPromise, explicitCacheKey) => {
+  var _a;
+  if (explicitCacheKey) return explicitCacheKey;
+  if (!fetchPromise) return "";
+  const functionName = (_a = fetchPromise.name) == null ? void 0 : _a.trim();
+  if (functionName) return `fn:${functionName}`;
+  return `anon:${hashString(fetchPromise.toString())}`;
+};
+var isAbortError = (error) => {
+  var _a, _b, _c;
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error;
+  if (maybeError.name === "AbortError") return true;
+  if (((_a = maybeError.details) == null ? void 0 : _a.name) === "AbortError") return true;
+  if (((_c = (_b = maybeError.details) == null ? void 0 : _b.abortError) == null ? void 0 : _c.name) === "AbortError") return true;
+  return false;
+};
+var sharedCache = /* @__PURE__ */ new Map();
+var inFlightByKey = /* @__PURE__ */ new Map();
+var isCacheFresh = (entry, staleTimeMs) => {
+  if (!entry) return false;
+  if (!Number.isFinite(staleTimeMs)) return true;
+  return Date.now() - entry.updatedAt <= staleTimeMs;
+};
+var useRequest = (fetchPromise, disableCacheOrOptions = false) => {
+  var _a, _b, _c, _d, _e;
+  const options = (0, import_react2.useMemo)(
+    () => typeof disableCacheOrOptions === "boolean" ? { disableCache: disableCacheOrOptions } : disableCacheOrOptions,
+    [disableCacheOrOptions]
+  );
+  const disableCache = (_a = options.disableCache) != null ? _a : false;
+  const enabled = (_b = options.enabled) != null ? _b : true;
+  const staleTimeMs = (_c = options.staleTimeMs) != null ? _c : Number.POSITIVE_INFINITY;
+  const dedupe = (_d = options.dedupe) != null ? _d : true;
+  const deps = (_e = options.deps) != null ? _e : [];
+  const cacheKey = (0, import_react2.useMemo)(
+    () => resolveCacheKey(fetchPromise, options.cacheKey),
+    [fetchPromise, options.cacheKey]
+  );
+  const currentQueryRef = (0, import_react2.useRef)(null);
+  const ownsCurrentQueryRef = (0, import_react2.useRef)(false);
+  const requestIdRef = (0, import_react2.useRef)(0);
+  const mountedRef = (0, import_react2.useRef)(false);
   const [status, setStatus] = (0, import_react2.useState)(0);
   const [response, setResponse] = (0, import_react2.useState)(null);
-  (0, import_react2.useEffect)(() => {
-    if (!fetchPromise) return;
-    setStatus(1);
-    const cacheKey = fetchPromise.name;
-    if (cache.current[cacheKey] && !disableCache) {
-      setResponse(cache.current[cacheKey]);
-      setStatus(2);
-    } else {
-      queries.cancelAll();
-      const query = fetchPromise();
-      queries.add(query);
+  const [error, setError] = (0, import_react2.useState)(null);
+  const cancel = (0, import_react2.useCallback)(() => {
+    var _a2;
+    if (ownsCurrentQueryRef.current) {
+      (_a2 = currentQueryRef.current) == null ? void 0 : _a2.cancel();
+    }
+    currentQueryRef.current = null;
+    ownsCurrentQueryRef.current = false;
+  }, []);
+  const execute = (0, import_react2.useCallback)(
+    (force = false) => {
+      if (!fetchPromise || !enabled) return;
+      const key = cacheKey;
+      const sharedEntry = key.length > 0 ? sharedCache.get(key) : void 0;
+      if (!disableCache && !force && isCacheFresh(sharedEntry, staleTimeMs)) {
+        setError(null);
+        setResponse(sharedEntry == null ? void 0 : sharedEntry.value);
+        setStatus(2);
+        return;
+      }
+      requestIdRef.current += 1;
+      const activeRequestId = requestIdRef.current;
+      cancel();
+      const sharedInFlight = dedupe && key.length > 0 ? inFlightByKey.get(key) : void 0;
+      const query = sharedInFlight != null ? sharedInFlight : fetchPromise();
+      const ownsQuery = !sharedInFlight;
+      if (ownsQuery && dedupe && key.length > 0) {
+        inFlightByKey.set(key, query);
+      }
+      currentQueryRef.current = query;
+      ownsCurrentQueryRef.current = ownsQuery;
+      setStatus(1);
+      setError(null);
       query.then((res) => {
-        queries.remove(query);
-        cache.current[cacheKey] = res;
+        if (!mountedRef.current || requestIdRef.current !== activeRequestId) return;
+        if (key.length > 0) {
+          sharedCache.set(key, { value: res, updatedAt: Date.now() });
+        }
         setResponse(res);
         setStatus(2);
+      }).catch((err) => {
+        if (!mountedRef.current || requestIdRef.current !== activeRequestId) return;
+        if (isAbortError(err)) {
+          setStatus(0);
+          return;
+        }
+        setError(err);
+        setStatus(3);
+      }).then(() => {
+        if (ownsQuery && key.length > 0 && inFlightByKey.get(key) === query) {
+          inFlightByKey.delete(key);
+        }
+        if (currentQueryRef.current === query) {
+          currentQueryRef.current = null;
+          ownsCurrentQueryRef.current = false;
+        }
       });
-    }
-  }, []);
-  return { status, response };
+    },
+    [cacheKey, cancel, dedupe, disableCache, enabled, fetchPromise, staleTimeMs]
+  );
+  const refetch = (0, import_react2.useCallback)(() => {
+    execute(true);
+  }, [execute]);
+  const reset = (0, import_react2.useCallback)(() => {
+    cancel();
+    setError(null);
+    setResponse(null);
+    setStatus(0);
+  }, [cancel]);
+  (0, import_react2.useEffect)(() => {
+    mountedRef.current = true;
+    execute(false);
+    return () => {
+      mountedRef.current = false;
+      cancel();
+    };
+  }, [cancel, execute, ...deps]);
+  return {
+    status,
+    response,
+    error,
+    refetch,
+    cancel,
+    reset
+  };
 };
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

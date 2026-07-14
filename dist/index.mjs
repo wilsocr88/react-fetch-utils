@@ -237,59 +237,186 @@ var createFetchClient = (defaults = {}) => {
 var FetchPromise_default = FetchPromise;
 
 // src/useQueries.ts
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 function useQueries() {
+  const listRef = useRef([]);
   const [list, setList] = useState([]);
+  const syncList = useCallback(() => {
+    setList([...listRef.current]);
+  }, []);
+  const cancelAll = useCallback(() => {
+    if (listRef.current.length === 0) return;
+    listRef.current.forEach((query) => query.cancel());
+    listRef.current = [];
+    syncList();
+  }, [syncList]);
+  const add = useCallback(
+    (query) => {
+      listRef.current = [...listRef.current, query];
+      syncList();
+    },
+    [syncList]
+  );
+  const remove = useCallback(
+    (query) => {
+      listRef.current = listRef.current.filter((activeQuery) => activeQuery !== query);
+      syncList();
+    },
+    [syncList]
+  );
   return {
     list,
-    cancelAll: () => {
-      const tempList = [...list];
-      if (tempList.length > 0) {
-        tempList.forEach((q) => q.cancel());
-        setList([]);
-      }
-    },
-    add: (query) => {
-      setList((prev) => [...prev, query]);
-    },
-    remove: (query) => {
-      setList((prev) => prev.filter((q) => q !== query));
-    }
+    cancelAll,
+    add,
+    remove
   };
 }
 
 // src/useRequest.ts
-import { useState as useState2, useRef, useEffect } from "react";
+import { useState as useState2, useRef as useRef2, useEffect, useMemo, useCallback as useCallback2 } from "react";
 var statusEnum = {
   0: "idle",
   1: "fetching",
-  2: "done"
+  2: "done",
+  3: "error"
 };
-var useRequest = (fetchPromise, disableCache = false) => {
-  const cache = useRef({});
-  const queries = useQueries();
+var hashString = (value) => {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = hash * 33 ^ value.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+};
+var resolveCacheKey = (fetchPromise, explicitCacheKey) => {
+  var _a;
+  if (explicitCacheKey) return explicitCacheKey;
+  if (!fetchPromise) return "";
+  const functionName = (_a = fetchPromise.name) == null ? void 0 : _a.trim();
+  if (functionName) return `fn:${functionName}`;
+  return `anon:${hashString(fetchPromise.toString())}`;
+};
+var isAbortError = (error) => {
+  var _a, _b, _c;
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error;
+  if (maybeError.name === "AbortError") return true;
+  if (((_a = maybeError.details) == null ? void 0 : _a.name) === "AbortError") return true;
+  if (((_c = (_b = maybeError.details) == null ? void 0 : _b.abortError) == null ? void 0 : _c.name) === "AbortError") return true;
+  return false;
+};
+var sharedCache = /* @__PURE__ */ new Map();
+var inFlightByKey = /* @__PURE__ */ new Map();
+var isCacheFresh = (entry, staleTimeMs) => {
+  if (!entry) return false;
+  if (!Number.isFinite(staleTimeMs)) return true;
+  return Date.now() - entry.updatedAt <= staleTimeMs;
+};
+var useRequest = (fetchPromise, disableCacheOrOptions = false) => {
+  var _a, _b, _c, _d, _e;
+  const options = useMemo(
+    () => typeof disableCacheOrOptions === "boolean" ? { disableCache: disableCacheOrOptions } : disableCacheOrOptions,
+    [disableCacheOrOptions]
+  );
+  const disableCache = (_a = options.disableCache) != null ? _a : false;
+  const enabled = (_b = options.enabled) != null ? _b : true;
+  const staleTimeMs = (_c = options.staleTimeMs) != null ? _c : Number.POSITIVE_INFINITY;
+  const dedupe = (_d = options.dedupe) != null ? _d : true;
+  const deps = (_e = options.deps) != null ? _e : [];
+  const cacheKey = useMemo(
+    () => resolveCacheKey(fetchPromise, options.cacheKey),
+    [fetchPromise, options.cacheKey]
+  );
+  const currentQueryRef = useRef2(null);
+  const ownsCurrentQueryRef = useRef2(false);
+  const requestIdRef = useRef2(0);
+  const mountedRef = useRef2(false);
   const [status, setStatus] = useState2(0);
   const [response, setResponse] = useState2(null);
-  useEffect(() => {
-    if (!fetchPromise) return;
-    setStatus(1);
-    const cacheKey = fetchPromise.name;
-    if (cache.current[cacheKey] && !disableCache) {
-      setResponse(cache.current[cacheKey]);
-      setStatus(2);
-    } else {
-      queries.cancelAll();
-      const query = fetchPromise();
-      queries.add(query);
+  const [error, setError] = useState2(null);
+  const cancel = useCallback2(() => {
+    var _a2;
+    if (ownsCurrentQueryRef.current) {
+      (_a2 = currentQueryRef.current) == null ? void 0 : _a2.cancel();
+    }
+    currentQueryRef.current = null;
+    ownsCurrentQueryRef.current = false;
+  }, []);
+  const execute = useCallback2(
+    (force = false) => {
+      if (!fetchPromise || !enabled) return;
+      const key = cacheKey;
+      const sharedEntry = key.length > 0 ? sharedCache.get(key) : void 0;
+      if (!disableCache && !force && isCacheFresh(sharedEntry, staleTimeMs)) {
+        setError(null);
+        setResponse(sharedEntry == null ? void 0 : sharedEntry.value);
+        setStatus(2);
+        return;
+      }
+      requestIdRef.current += 1;
+      const activeRequestId = requestIdRef.current;
+      cancel();
+      const sharedInFlight = dedupe && key.length > 0 ? inFlightByKey.get(key) : void 0;
+      const query = sharedInFlight != null ? sharedInFlight : fetchPromise();
+      const ownsQuery = !sharedInFlight;
+      if (ownsQuery && dedupe && key.length > 0) {
+        inFlightByKey.set(key, query);
+      }
+      currentQueryRef.current = query;
+      ownsCurrentQueryRef.current = ownsQuery;
+      setStatus(1);
+      setError(null);
       query.then((res) => {
-        queries.remove(query);
-        cache.current[cacheKey] = res;
+        if (!mountedRef.current || requestIdRef.current !== activeRequestId) return;
+        if (key.length > 0) {
+          sharedCache.set(key, { value: res, updatedAt: Date.now() });
+        }
         setResponse(res);
         setStatus(2);
+      }).catch((err) => {
+        if (!mountedRef.current || requestIdRef.current !== activeRequestId) return;
+        if (isAbortError(err)) {
+          setStatus(0);
+          return;
+        }
+        setError(err);
+        setStatus(3);
+      }).then(() => {
+        if (ownsQuery && key.length > 0 && inFlightByKey.get(key) === query) {
+          inFlightByKey.delete(key);
+        }
+        if (currentQueryRef.current === query) {
+          currentQueryRef.current = null;
+          ownsCurrentQueryRef.current = false;
+        }
       });
-    }
-  }, []);
-  return { status, response };
+    },
+    [cacheKey, cancel, dedupe, disableCache, enabled, fetchPromise, staleTimeMs]
+  );
+  const refetch = useCallback2(() => {
+    execute(true);
+  }, [execute]);
+  const reset = useCallback2(() => {
+    cancel();
+    setError(null);
+    setResponse(null);
+    setStatus(0);
+  }, [cancel]);
+  useEffect(() => {
+    mountedRef.current = true;
+    execute(false);
+    return () => {
+      mountedRef.current = false;
+      cancel();
+    };
+  }, [cancel, execute, ...deps]);
+  return {
+    status,
+    response,
+    error,
+    refetch,
+    cancel,
+    reset
+  };
 };
 export {
   FetchPromise_default as FetchPromise,
