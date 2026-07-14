@@ -9,4 +9,4 @@ export type {
 } from "./FetchPromise";
 export { default as useQueries } from "./useQueries";
 export { statusEnum, useRequest } from "./useRequest";
-export type { Status } from "./useRequest";
+export type { Status, UseRequestOptions, UseRequestResult } from "./useRequest";

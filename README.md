@@ -1,4 +1,5 @@
 # react-fetch-utils
+
 ![license](https://img.shields.io/npm/l/react-fetch-utils)
 ![version](https://img.shields.io/npm/v/react-fetch-utils)
 
@@ -30,6 +31,8 @@ import {
     type FetchPromiseParams,
     type FetchRequestConfig,
     type Status,
+    type UseRequestOptions,
+    type UseRequestResult,
 } from "react-fetch-utils";
 ```
 
@@ -46,6 +49,8 @@ import {
 - `FetchPromiseParams` (type)
 - `FetchRequestConfig` (type)
 - `Status` (type)
+- `UseRequestOptions` (type)
+- `UseRequestResult` (type)
 
 ## Quick Start
 
@@ -97,7 +102,6 @@ type FetchPromiseParams = {
     url: string;
     method: string;
     body?: unknown;
-    respType?: "raw" | "json" | null;
     headers?: HeadersInit | Record<string, string>;
     timeoutMs?: number;
     baseUrl?: string;
@@ -114,7 +118,6 @@ type FetchPromiseParams = {
 
 Behavior:
 
-- Backward compatible with existing `respType: "json" | "raw"`.
 - New parsing modes via `parseAs`:
   - `json` (default)
   - `raw` (`Blob`)
@@ -196,7 +199,7 @@ import { FetchPromise } from "react-fetch-utils";
 const download = FetchPromise<Blob>({
     url: "/api/report",
     method: "GET",
-    respType: "raw",
+    parseAs: "raw",
 });
 
 // Cancel if no longer needed
@@ -316,24 +319,45 @@ export function SearchBox({ term }: { term: string }) {
 
 ### `useRequest`
 
-Runs a cancellable request factory on mount, tracks status, and caches by factory function name.
+Runs a cancellable request factory with error handling, cancellation, and optional dependency-driven reruns.
 
 Signature:
 
 ```ts
 function useRequest<T = unknown>(
     fetchPromise: (() => CancellablePromise<T>) | null | undefined,
-    disableCache?: boolean,
-): { status: Status; response: T | null };
+    disableCacheOrOptions?: boolean | UseRequestOptions,
+): UseRequestResult<T>;
+
+type UseRequestOptions = {
+    disableCache?: boolean;
+    cacheKey?: string;
+    enabled?: boolean;
+    deps?: ReadonlyArray<unknown>;
+    staleTimeMs?: number;
+    dedupe?: boolean;
+};
+
+type UseRequestResult<T> = {
+    status: Status;
+    response: T | null;
+    error: unknown;
+    refetch: () => void;
+    cancel: () => void;
+    reset: () => void;
+};
 ```
 
 Behavior:
 
-- Status transitions: `0` (idle) -> `1` (fetching) -> `2` (done)
-- Uses `fetchPromise.name` as cache key.
-- On cache hit and `disableCache === false`, returns cached data.
-- On cache miss, cancels tracked queries, runs request, tracks/removes it, then stores response.
-- Does not auto-run again on dependency changes; it executes once on mount for that hook instance.
+- Status transitions: `0` (idle) -> `1` (fetching) -> `2` (done) or `3` (error)
+- Handles promise rejections and exposes them through `error`.
+- Uses `cacheKey` option when provided. Fallback key is derived from factory name (or function source hash for anonymous factories).
+- Reuses fresh cache across hook instances unless `disableCache: true`.
+- `staleTimeMs` controls cache freshness (default: `Infinity`).
+- `dedupe` reuses in-flight requests that share the same `cacheKey` (default: `true`).
+- Supports automatic reruns by passing `deps` and can be disabled with `enabled: false`.
+- Exposes `refetch()`, `cancel()`, and `reset()` helpers.
 
 Example (cached by default):
 
@@ -351,12 +375,24 @@ function loadProfile() {
 }
 
 export function ProfilePanel() {
-    const { status, response } = useRequest(loadProfile);
+    const { status, response, error, refetch } = useRequest(loadProfile, {
+        cacheKey: "profile",
+    });
 
     useEffect(() => {
         if (status !== 2 || !response) return;
         console.log("Ready:", response.name);
     }, [status, response]);
+
+    if (status === 3) {
+        return (
+            <div>
+                <p>Failed to load profile.</p>
+                <button onClick={refetch}>Retry</button>
+                <pre>{String(error)}</pre>
+            </div>
+        );
+    }
 
     return <p>State: {statusEnum[status]}</p>;
 }
@@ -377,6 +413,7 @@ const statusEnum = {
     0: "idle",
     1: "fetching",
     2: "done",
+    3: "error",
 } as const;
 ```
 
@@ -463,7 +500,7 @@ type FetchClientDefaults = Omit<FetchPromiseParams, "url" | "method"> & {
 ### `Status` (type)
 
 ```ts
-type Status = 0 | 1 | 2;
+type Status = 0 | 1 | 2 | 3;
 ```
 
 Example:
@@ -477,9 +514,8 @@ console.log(statusEnum[status]); // "fetching"
 
 ## Notes
 
-- `useRequest` is built on top of `useQueries`.
-- For errors, attach `.catch(...)` where you create and consume `CancellablePromise` requests.
-- `respType` is still supported for backward compatibility; prefer `parseAs` in new code.
+- Use `cacheKey` with `useRequest` when a request has dynamic arguments to avoid collisions.
+- Set `staleTimeMs: 0` to force revalidation on each mount while still allowing in-flight dedupe.
 
 ## License
 
