@@ -1,6 +1,6 @@
 {
   "name": "react-fetch-utils",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Lightweight React hooks and utilities for fetch requests with cancellation support",
   "main": "./dist/index.js",
   "scripts": {
@@ -61,6 +61,8 @@
     "hooks",
     "cancel",
     "abort",
-    "request"
+    "request",
+    "utility",
+    "typescript"
   ]
 }

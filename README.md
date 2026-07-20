@@ -2,6 +2,8 @@
 
 ![license](https://img.shields.io/npm/l/react-fetch-utils)
 ![version](https://img.shields.io/npm/v/react-fetch-utils)
+![minified size](https://img.shields.io/bundlephobia/min/react-fetch-utils)
+[![0 dependencies!](https://0dependencies.dev/0dependencies.svg)](https://0dependencies.dev)
 
 Lightweight React hooks and utilities for fetch requests with cancellation support.
 
@@ -908,3 +910,4 @@ MIT
 ## CONTRIBUTING
 
 See [CONTRIBUTING](https://github.com/wilsocr88/react-fetch-utils/blob/master/CONTRIBUTING.md)
+and [ISSUES](https://github.com/wilsocr88/react-fetch-utils/issues)
