@@ -1,40 +1,68 @@
+/** Configuration parameters for FetchPromise requests */
 export interface FetchPromiseParams {
+    /** Request URL (relative or absolute) */
     url: string;
+    /** HTTP method (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, etc.) */
     method: string;
+    /** Request body (will be JSON-stringified if not already BodyInit type) */
     body?: unknown;
+    /** Deprecated: use parseAs instead. Determines response parsing mode */
     respType?: "raw" | "json" | null;
+    /** Request headers */
     headers?: HeadersInit | Record<string, string>;
+    /** Request timeout in milliseconds. If exceeded, request is aborted */
     timeoutMs?: number;
+    /** Base URL to resolve relative URLs against */
     baseUrl?: string;
+    /** Auto-set Content-Type header for JSON bodies (default: true) */
     includeContentType?: boolean;
+    /** How to parse the response: 'json' (default), 'raw' (blob), 'text', or 'response' */
     parseAs?: "json" | "raw" | "text" | "response";
+    /** Intercept and modify request config before sending */
     onRequest?: (
         request: FetchRequestConfig
     ) => FetchRequestConfig | void | Promise<FetchRequestConfig | void>;
+    /** Custom status validation. Return true to treat as success */
     validateStatus?: (status: number, response: Response) => boolean;
+    /** Async function to retrieve auth token for Authorization header */
     getAuthToken?: () => string | null | undefined | Promise<string | null | undefined>;
+    /** Allow request body for GET/HEAD methods (default: false) */
     allowBodyForGetHead?: boolean;
 }
 
+/** Request config object passed to onRequest interceptor */
 export interface FetchRequestConfig {
+    /** Final resolved URL */
     url: string;
+    /** Fetch RequestInit object */
     init: RequestInit;
+    /** Headers object for inspection/modification */
     headers: Headers;
 }
 
+/** Error object returned when FetchPromise rejects */
 export interface FetchPromiseError {
+    /** Error category: 'Unauthorized' (401), 'Timeout' (request exceeded timeoutMs), or 'Unknown' */
     reason: "Unauthorized" | "Timeout" | "Unknown";
+    /** Error details (status info, parsed error response, etc.) */
     details: unknown;
+    /** HTTP status code if available */
     status?: number;
+    /** Response object if available */
     response?: Response;
+    /** Original error thrown by fetch or timeout handler */
     originalError?: unknown;
 }
 
+/** Default configuration for all requests made by a FetchClient instance */
 export type FetchClientDefaults = Omit<FetchPromiseParams, "url" | "method"> & {
+    /** Default HTTP method (can be overridden per request) */
     method?: string;
 };
 
+/** Promise with a cancel() method for aborting the underlying fetch request */
 export interface CancellablePromise<T = unknown> extends Promise<T> {
+    /** Abort the in-flight request. This will cause the promise to reject */
     cancel: () => void;
 }
 
@@ -107,8 +135,31 @@ const normalizeErrorDetails = (error: unknown) => {
 };
 
 /**
- * @param params - Request configuration
- * @returns A promise with a `.cancel()` method that calls `AbortController.abort()`
+ * Creates a cancellable promise around the native fetch API.
+ *
+ * Handles:
+ * - Request timeout with automatic abort
+ * - Authorization header injection
+ * - Request/response interception via onRequest hook
+ * - Multiple response parsing modes (json, raw blob, text, raw response)
+ * - Custom status validation
+ * - Proper error categorization (Unauthorized, Timeout, Unknown)
+ *
+ * @template T - Type of the parsed response
+ * @param params - Request configuration (url, method, headers, etc.)
+ * @returns Promise with .cancel() method to abort the request
+ *
+ * @example
+ * ```ts
+ * const promise = FetchPromise<User>({
+ *   url: '/api/users/1',
+ *   method: 'GET',
+ *   timeoutMs: 5000,
+ *   getAuthToken: () => localStorage.getItem('token')
+ * });
+ * const user = await promise;
+ * promise.cancel(); // Abort mid-flight
+ * ```
  */
 const FetchPromise = <T = unknown>(params: FetchPromiseParams): CancellablePromise<T> => {
     const controller = new AbortController();
@@ -271,6 +322,30 @@ const FetchPromise = <T = unknown>(params: FetchPromiseParams): CancellablePromi
     return promise;
 };
 
+/**
+ * Creates a reusable fetch client with default configuration.
+ *
+ * Merges default config (baseUrl, headers, interceptors, etc.) with request-specific params.
+ * Useful for API clients with consistent settings.
+ *
+ * @param defaults - Default configuration applied to all requests
+ * @returns Function with same signature as FetchPromise but with defaults pre-applied
+ *
+ * @example
+ * ```ts
+ * const apiClient = createFetchClient({
+ *   baseUrl: 'https://api.example.com',
+ *   headers: { 'X-API-Key': 'secret' },
+ *   getAuthToken: () => localStorage.getItem('token'),
+ *   timeoutMs: 10000
+ * });
+ *
+ * const user = await apiClient<User>({
+ *   url: '/users/1',
+ *   method: 'GET'
+ * });
+ * ```
+ */
 export const createFetchClient = (defaults: FetchClientDefaults = {}) => {
     return <T = unknown>(params: FetchPromiseParams): CancellablePromise<T> => {
         const runDefaultOnRequest = defaults.onRequest;

@@ -265,6 +265,7 @@ function useQueries() {
     [syncList]
   );
   return {
+    /** Array of currently tracked queries */
     list,
     cancelAll,
     add,
@@ -279,6 +280,16 @@ var statusEnum = {
   1: "fetching",
   2: "done",
   3: "error"
+};
+var STATUS = {
+  /** No request has been made or hook is disabled */
+  IDLE: 0,
+  /** Request is in progress */
+  LOADING: 1,
+  /** Request completed successfully */
+  SUCCESS: 2,
+  /** Request failed with an error */
+  ERROR: 3
 };
 var hashString = (value) => {
   let hash = 5381;
@@ -420,6 +431,7 @@ var useRequest = (fetchPromise, disableCacheOrOptions = false) => {
 };
 export {
   FetchPromise_default as FetchPromise,
+  STATUS,
   createFetchClient,
   statusEnum,
   useQueries,

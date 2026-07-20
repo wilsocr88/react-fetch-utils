@@ -38,6 +38,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var index_exports = {};
 __export(index_exports, {
   FetchPromise: () => FetchPromise_default,
+  STATUS: () => STATUS,
   createFetchClient: () => createFetchClient,
   statusEnum: () => statusEnum,
   useQueries: () => useQueries,
@@ -292,6 +293,7 @@ function useQueries() {
     [syncList]
   );
   return {
+    /** Array of currently tracked queries */
     list,
     cancelAll,
     add,
@@ -306,6 +308,16 @@ var statusEnum = {
   1: "fetching",
   2: "done",
   3: "error"
+};
+var STATUS = {
+  /** No request has been made or hook is disabled */
+  IDLE: 0,
+  /** Request is in progress */
+  LOADING: 1,
+  /** Request completed successfully */
+  SUCCESS: 2,
+  /** Request failed with an error */
+  ERROR: 3
 };
 var hashString = (value) => {
   let hash = 5381;
@@ -448,6 +460,7 @@ var useRequest = (fetchPromise, disableCacheOrOptions = false) => {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   FetchPromise,
+  STATUS,
   createFetchClient,
   statusEnum,
   useQueries,

@@ -24,7 +24,8 @@ import {
     createFetchClient,
     useQueries,
     useRequest,
-    statusEnum,
+    STATUS,           // Constants for readable status checks
+    statusEnum,        // Legacy reverse lookup (0 -> "idle", etc.)
     type CancellablePromise,
     type FetchClientDefaults,
     type FetchPromiseError,
@@ -38,11 +39,12 @@ import {
 
 ## Exports
 
-- `FetchPromise`
-- `createFetchClient`
-- `useQueries`
-- `useRequest`
-- `statusEnum`
+- `FetchPromise` - Create a cancellable fetch request
+- `createFetchClient` - Create a reusable API client with defaults
+- `useQueries` - Track multiple in-flight requests
+- `useRequest` - React hook for fetch with caching & lifecycle management
+- `STATUS` - Status constants (IDLE, LOADING, SUCCESS, ERROR)
+- `statusEnum` - Reverse lookup map for status codes (legacy)
 - `CancellablePromise` (type)
 - `FetchClientDefaults` (type)
 - `FetchPromiseError` (type)
@@ -56,7 +58,7 @@ import {
 
 ```tsx
 import { useEffect } from "react";
-import { FetchPromise, useRequest } from "react-fetch-utils";
+import { FetchPromise, useRequest, STATUS } from "react-fetch-utils";
 
 type Todo = { id: number; title: string; completed: boolean };
 
@@ -68,15 +70,16 @@ function getTodo() {
 }
 
 export function TodoCard() {
-    const { status, response } = useRequest(getTodo);
+    const { status, response, error } = useRequest(getTodo);
 
     useEffect(() => {
-        if (status !== 2 || !response) return;
+        if (status !== STATUS.SUCCESS || !response) return;
         console.log("Loaded:", response.title);
     }, [status, response]);
 
-    if (status === 0) return <p>Idle</p>;
-    if (status === 1) return <p>Loading...</p>;
+    if (status === STATUS.IDLE) return <p>Idle</p>;
+    if (status === STATUS.LOADING) return <p>Loading...</p>;
+    if (status === STATUS.ERROR) return <p>Error: {String(error)}</p>;
     return <p>{response?.title}</p>;
 }
 ```
@@ -118,7 +121,7 @@ type FetchPromiseParams = {
 
 Behavior:
 
-- New parsing modes via `parseAs`:
+- Parsing mode via `parseAs`:
   - `json` (default)
   - `raw` (`Blob`)
   - `text` (`string`)
@@ -350,7 +353,7 @@ type UseRequestResult<T> = {
 
 Behavior:
 
-- Status transitions: `0` (idle) -> `1` (fetching) -> `2` (done) or `3` (error)
+- Status transitions: `0` (idle) -> `1` (loading) -> `2` (success) or `3` (error)
 - Handles promise rejections and exposes them through `error`.
 - Uses `cacheKey` option when provided. Fallback key is derived from factory name (or function source hash for anonymous factories).
 - Reuses fresh cache across hook instances unless `disableCache: true`.
@@ -359,11 +362,11 @@ Behavior:
 - Supports automatic reruns by passing `deps` and can be disabled with `enabled: false`.
 - Exposes `refetch()`, `cancel()`, and `reset()` helpers.
 
-Example (cached by default):
+Example (cached by default, with STATUS constants):
 
 ```tsx
 import { useEffect } from "react";
-import { FetchPromise, useRequest, statusEnum } from "react-fetch-utils";
+import { FetchPromise, useRequest, STATUS } from "react-fetch-utils";
 
 type Profile = { name: string; role: string };
 
@@ -380,11 +383,11 @@ export function ProfilePanel() {
     });
 
     useEffect(() => {
-        if (status !== 2 || !response) return;
+        if (status !== STATUS.SUCCESS || !response) return;
         console.log("Ready:", response.name);
     }, [status, response]);
 
-    if (status === 3) {
+    if (status === STATUS.ERROR) {
         return (
             <div>
                 <p>Failed to load profile.</p>
@@ -394,7 +397,11 @@ export function ProfilePanel() {
         );
     }
 
-    return <p>State: {statusEnum[status]}</p>;
+    if (status === STATUS.LOADING) {
+        return <p>Loading...</p>;
+    }
+
+    return <p>Profile: {response?.name}</p>;
 }
 ```
 
@@ -516,6 +523,147 @@ console.log(statusEnum[status]); // "fetching"
 
 - Use `cacheKey` with `useRequest` when a request has dynamic arguments to avoid collisions.
 - Set `staleTimeMs: 0` to force revalidation on each mount while still allowing in-flight dedupe.
+
+## Troubleshooting
+
+### Request is stuck in loading state
+
+**Problem**: `status === STATUS.LOADING` never transitions to SUCCESS or ERROR.
+
+**Possible causes:**
+
+- The factory function is not being called. Check that `enabled` is `true` (default).
+- The promise never resolves or rejects. Ensure your fetch returns valid JSON or use `parseAs: "text"` / `parseAs: "raw"`.
+- Network request is hanging. Add a `timeoutMs` to auto-abort long requests:
+
+  ```ts
+  const { status } = useRequest(() =>
+    FetchPromise({ url: "/api/data", method: "GET", timeoutMs: 5000 })
+  );
+  ```
+
+### Cache is not being cleared
+
+**Problem**: Stale data persists after mutation or page change.
+
+**Solutions:**
+
+- Explicitly call `refetch()` after mutations to bypass cache:
+
+  ```ts
+  const { refetch } = useRequest(fetchData);
+  await submitForm(data);
+  refetch(); // Force fresh data
+  ```
+
+- Use different cache keys for different data sets:
+
+  ```ts
+  const userId = props.userId;
+  const { response } = useRequest(() => fetchUser(userId), {
+    cacheKey: `user-${userId}` // Unique per user
+  });
+  ```
+
+- Disable caching for specific requests:
+
+  ```ts
+  const { response } = useRequest(fetchData, { disableCache: true });
+  ```
+
+### Multiple requests firing for the same data
+
+**Problem**: The same request runs multiple times instead of being deduplicated.
+
+**Causes & solutions:**
+
+- Anonymous functions create new references on every render. Use named functions or `useCallback`:
+
+  ```tsx
+  // ❌ Bad: new function on every render
+  const { response } = useRequest(() => FetchPromise({ url, method }));
+
+  // ✅ Good: stable function reference
+  const fetchData = useCallback(() => 
+    FetchPromise({ url, method }), [url, method]
+  );
+  const { response } = useRequest(fetchData);
+  ```
+
+- Deduplication is enabled by default. Disable it only if you need parallel requests:
+
+  ```ts
+  const { response } = useRequest(fetchData, { dedupe: false });
+  ```
+
+### Authorization / 401 errors
+
+**Problem**: Requests are rejected with `reason: "Unauthorized"`.
+
+**Solutions:**
+
+- Provide a `getAuthToken` function to auto-inject bearer tokens:
+
+  ```ts
+  FetchPromise({
+    url: "/api/protected",
+    method: "GET",
+    getAuthToken: () => localStorage.getItem("token")
+  });
+  ```
+
+- Handle 401 in `onRequest` to refresh tokens:
+
+  ```ts
+  const client = createFetchClient({
+    onRequest: async (request) => {
+      const token = await refreshTokenIfNeeded();
+      request.headers.set("Authorization", `Bearer ${token}`);
+      return request;
+    }
+  });
+  ```
+
+### Request timeouts are not working
+
+**Problem**: Request runs past `timeoutMs` without aborting.
+
+**Solution**: Ensure `timeoutMs` is set and is a positive number:
+
+```ts
+FetchPromise({
+  url: "/api/slow",
+  method: "GET",
+  timeoutMs: 3000 // Abort after 3 seconds
+});
+```
+
+Check error handling to catch timeout errors:
+
+```ts
+promise.catch(err => {
+  if (err.reason === "Timeout") {
+    console.error("Request timed out after", err.details.timeoutMs, "ms");
+  }
+});
+```
+
+### TypeScript errors with response type
+
+**Problem**: TypeScript complains about response type mismatch.
+
+**Solution**: Explicitly type the generic parameter:
+
+```ts
+type ApiResponse = { id: number; name: string };
+
+const { response } = useRequest<ApiResponse>(() =>
+  FetchPromise<ApiResponse>({
+    url: "/api/data",
+    method: "GET"
+  })
+);
+```
 
 ## License
 

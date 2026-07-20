@@ -2,11 +2,12 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { CancellablePromise } from "./FetchPromise";
 
 /**
- * Status enumerator.
- * 0 = "idle"
- * 1 = "fetching"
- * 2 = "done"
- * 3 = "error"
+ * Status enumerator for reverse lookup.
+ * Maps status codes to human-readable strings:
+ * - 0 = "idle"
+ * - 1 = "fetching"
+ * - 2 = "done"
+ * - 3 = "error"
  */
 export const statusEnum = {
     0: "idle",
@@ -15,23 +16,59 @@ export const statusEnum = {
     3: "error",
 } as const;
 
+/**
+ * Status constants for use in request hooks.
+ * Recommended for better readability.
+ * @example
+ * ```ts
+ * if (status === STATUS.LOADING) {
+ *   return <Spinner />;
+ * }
+ * ```
+ */
+export const STATUS = {
+    /** No request has been made or hook is disabled */
+    IDLE: 0,
+    /** Request is in progress */
+    LOADING: 1,
+    /** Request completed successfully */
+    SUCCESS: 2,
+    /** Request failed with an error */
+    ERROR: 3,
+} as const;
+
+/** Request status type. One of: 0 (idle), 1 (loading), 2 (success), 3 (error) */
 export type Status = 0 | 1 | 2 | 3;
 
+/** Configuration options for the useRequest hook */
 export type UseRequestOptions = {
+    /** Disable caching for this request (default: false) */
     disableCache?: boolean;
+    /** Explicit cache key; defaults to function name or hashed function string */
     cacheKey?: string;
+    /** Enable or disable the request (default: true) */
     enabled?: boolean;
+    /** Dependency array; re-runs request when dependencies change (default: []) */
     deps?: ReadonlyArray<unknown>;
+    /** Cache validity duration in milliseconds (default: Infinity) */
     staleTimeMs?: number;
+    /** Deduplicate concurrent requests with the same cache key (default: true) */
     dedupe?: boolean;
 };
 
+/** Result object returned by useRequest hook */
 export type UseRequestResult<T> = {
+    /** Current request status (0=idle, 1=loading, 2=success, 3=error) */
     status: Status;
+    /** Parsed response data from successful request, or null */
     response: T | null;
+    /** Error object from failed request, or null */
     error: unknown;
+    /** Refetch the data, bypassing cache */
     refetch: () => void;
+    /** Cancel the in-flight request if any */
     cancel: () => void;
+    /** Reset to initial idle state, clearing response and error */
     reset: () => void;
 };
 
@@ -81,9 +118,20 @@ const isCacheFresh = (entry: CacheEntry | undefined, staleTimeMs: number): boole
 };
 
 /**
- * @param fetchPromise - A factory function that returns a `CancellablePromise`
- * @param disableCacheOrOptions - Disable cache via boolean (legacy) or provide options
- * @returns Hook state and controls for request status, response, and retries
+ * React hook for managing fetch requests with caching, deduplication, and lifecycle management.
+ *
+ * @template T - Type of the successful response data
+ * @param fetchPromise - Factory function that returns a CancellablePromise. Called on mount and when deps change. Pass null/undefined to disable.
+ * @param disableCacheOrOptions - Either a boolean to disable caching (legacy), or UseRequestOptions object for granular control
+ * @returns Hook state object with status, response, error, and control methods (refetch, cancel, reset)
+ *
+ * @example
+ * ```ts
+ * const { status, response, error, refetch } = useRequest(
+ *   () => FetchPromise({ url: '/api/user', method: 'GET' }),
+ *   { cacheKey: 'user', staleTimeMs: 5000 }
+ * );
+ * ```
  */
 export const useRequest = <T = unknown>(
     fetchPromise: (() => CancellablePromise<T>) | null | undefined,
