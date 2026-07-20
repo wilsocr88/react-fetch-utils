@@ -1,9 +1,13 @@
 export { default as FetchPromise } from "./FetchPromise";
-export { createFetchClient } from "./FetchPromise";
+export { createFetchClient, isUnauthorizedError, isTimeoutError, isUnknownError } from "./FetchPromise";
 export type {
     FetchPromiseParams,
+    FetchResponseConfig,
     CancellablePromise,
     FetchPromiseError,
+    UnauthorizedError,
+    TimeoutError,
+    UnknownError,
     FetchRequestConfig,
     FetchClientDefaults,
 } from "./FetchPromise";

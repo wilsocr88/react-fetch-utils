@@ -26,9 +26,16 @@ import {
     useRequest,
     STATUS,           // Constants for readable status checks
     statusEnum,        // Legacy reverse lookup (0 -> "idle", etc.)
+    isUnauthorizedError,  // Type guard for 401 errors
+    isTimeoutError,       // Type guard for timeout errors
+    isUnknownError,       // Type guard for other errors
     type CancellablePromise,
     type FetchClientDefaults,
     type FetchPromiseError,
+    type FetchResponseConfig,
+    type UnauthorizedError,
+    type TimeoutError,
+    type UnknownError,
     type FetchPromiseParams,
     type FetchRequestConfig,
     type Status,
@@ -41,13 +48,26 @@ import {
 
 - `FetchPromise` - Create a cancellable fetch request
 - `createFetchClient` - Create a reusable API client with defaults
-- `useQueries` - Track multiple in-flight requests
+- `useQueries` - Track multiple in-flight requests with status aggregation
 - `useRequest` - React hook for fetch with caching & lifecycle management
 - `STATUS` - Status constants (IDLE, LOADING, SUCCESS, ERROR)
 - `statusEnum` - Reverse lookup map for status codes (legacy)
-- `CancellablePromise` (type)
-- `FetchClientDefaults` (type)
-- `FetchPromiseError` (type)
+- `isUnauthorizedError` - Type guard for UnauthorizedError
+- `isTimeoutError` - Type guard for TimeoutError
+- `isUnknownError` - Type guard for UnknownError
+- **Types:**
+  - `CancellablePromise`
+  - `FetchClientDefaults`
+  - `FetchPromiseError` (discriminated union of error types)
+  - `UnauthorizedError` (401 response)
+  - `TimeoutError` (request timeout)
+  - `UnknownError` (other failures)
+  - `FetchResponseConfig` (passed to onResponse interceptor)
+  - `FetchPromiseParams`
+  - `FetchRequestConfig`
+  - `Status`
+  - `UseRequestOptions`
+  - `UseRequestResult`
 - `FetchPromiseParams` (type)
 - `FetchRequestConfig` (type)
 - `Status` (type)
@@ -267,9 +287,49 @@ apiRequest({
 });
 ```
 
+Example (response interceptor for data transformation):
+
+```ts
+import { createFetchClient, type FetchResponseConfig } from "react-fetch-utils";
+
+// Transform all responses to add a timestamp
+export const apiRequest = createFetchClient({
+    baseUrl: "https://api.example.com/v1",
+    onResponse: async (response: FetchResponseConfig) => {
+        // Wrap response data with metadata
+        return {
+            data: response.data,
+            fetchedAt: new Date(),
+            status: response.status,
+        };
+    },
+});
+```
+
+Example (response interceptor for error handling):
+
+```ts
+// Add request/response logging and error transformation
+export const apiRequest = createFetchClient({
+    baseUrl: "https://api.example.com/v1",
+    onRequest: (request) => {
+        console.log("Request:", request.url, request.init.method);
+        return request;
+    },
+    onResponse: async (response: FetchResponseConfig) => {
+        console.log("Response:", response.status, response.data);
+        // Custom error handling or transformation
+        if (response.status >= 400) {
+            throw new Error(`API Error: ${response.status}`);
+        }
+        return response.data;
+    },
+});
+```
+
 ### `useQueries`
 
-Tracks active cancellable promises and provides list management helpers.
+Tracks active cancellable promises with status aggregation and batch refetch.
 
 Signature:
 
@@ -279,10 +339,19 @@ function useQueries(): {
     cancelAll: () => void;
     add: (query: CancellablePromise) => void;
     remove: (query: CancellablePromise) => void;
+    getStatus: () => "idle" | "loading" | "success" | "error";
+    refetchAll: (queries: (() => CancellablePromise)[]) => void;
 };
 ```
 
-Example:
+**Status aggregation:**
+
+- `idle` - No active queries
+- `loading` - At least one query is in progress
+- `error` - At least one query failed
+- `success` - All queries completed successfully
+
+Example (basic tracking):
 
 ```tsx
 import { useEffect } from "react";
@@ -317,6 +386,50 @@ export function SearchBox({ term }: { term: string }) {
     }, [term]);
 
     return <div>Active queries: {queries.list.length}</div>;
+}
+```
+
+Example (status aggregation and batch refetch):
+
+```tsx
+import { useEffect } from "react";
+import { FetchPromise, useQueries } from "react-fetch-utils";
+
+function fetchUser() {
+    return FetchPromise({ url: "/api/user", method: "GET" });
+}
+
+function fetchPosts() {
+    return FetchPromise({ url: "/api/posts", method: "GET" });
+}
+
+function fetchComments() {
+    return FetchPromise({ url: "/api/comments", method: "GET" });
+}
+
+export function Dashboard() {
+    const queries = useQueries();
+    const status = queries.getStatus();
+
+    const handleLoadAll = () => {
+        queries.refetchAll([fetchUser, fetchPosts, fetchComments]);
+    };
+
+    useEffect(() => {
+        handleLoadAll();
+        return () => queries.cancelAll();
+    }, []);
+
+    if (status === "idle") return <p>Ready</p>;
+    if (status === "loading") return <p>Loading...</p>;
+    if (status === "error") return <p>Failed to load data</p>;
+    
+    return (
+        <div>
+            <p>All data loaded ({queries.list.length} queries)</p>
+            <button onClick={handleLoadAll}>Refresh All</button>
+        </div>
+    );
 }
 ```
 
@@ -476,13 +589,77 @@ FetchPromise(request);
 
 ### `FetchPromiseError` (type)
 
+Discriminated union of error types. Use type guards to handle errors precisely:
+
 ```ts
-type FetchPromiseError = {
-    reason: "Unauthorized" | "Timeout" | "Unknown";
+import { 
+    type FetchPromiseError,
+    isUnauthorizedError,
+    isTimeoutError,
+    isUnknownError
+} from "react-fetch-utils";
+
+const handleError = (error: FetchPromiseError) => {
+    if (isUnauthorizedError(error)) {
+        // 401 Unauthorized - handle auth failure
+        console.error("Auth failed:", error.status, error.response);
+        redirectToLogin();
+    } else if (isTimeoutError(error)) {
+        // Request timeout
+        console.error("Timeout after", error.timeoutMs, "ms");
+        showRetryUI();
+    } else if (isUnknownError(error)) {
+        // Network error, parse error, or invalid status
+        console.error("Request failed:", error.details);
+        showErrorUI(error);
+    }
+};
+```
+
+**Error types:**
+
+```ts
+// 401 Unauthorized response
+interface UnauthorizedError {
+    reason: "Unauthorized";
+    status: 401;
+    response: Response;
     details: unknown;
+    originalError?: unknown;
+}
+
+// Request timeout (exceeded timeoutMs)
+interface TimeoutError {
+    reason: "Timeout";
+    timeoutMs?: number;
+    details: unknown;
+    originalError: unknown;
+}
+
+// Other failures (network error, parsing error, failed status validation, etc.)
+interface UnknownError {
+    reason: "Unknown";
     status?: number;
     response?: Response;
+    details: unknown;
     originalError?: unknown;
+}
+
+type FetchPromiseError = UnauthorizedError | TimeoutError | UnknownError;
+```
+
+### `FetchResponseConfig` (type)
+
+```ts
+type FetchResponseConfig = {
+    /** HTTP status code */
+    status: number;
+    /** Response headers */
+    headers: Headers;
+    /** Parsed/raw response data */
+    data: unknown;
+    /** Original fetch Response object */
+    response: Response;
 };
 ```
 
@@ -523,6 +700,65 @@ console.log(statusEnum[status]); // "fetching"
 
 - Use `cacheKey` with `useRequest` when a request has dynamic arguments to avoid collisions.
 - Set `staleTimeMs: 0` to force revalidation on each mount while still allowing in-flight dedupe.
+
+## Error Handling
+
+Use type guards to handle different error types precisely:
+
+```tsx
+import { 
+    FetchPromise,
+    isUnauthorizedError,
+    isTimeoutError,
+    isUnknownError,
+} from "react-fetch-utils";
+
+async function loadData() {
+    try {
+        const data = await FetchPromise({ url: "/api/data", method: "GET" });
+        return data;
+    } catch (error) {
+        if (isUnauthorizedError(error)) {
+            // Handle 401 - redirect to login
+            window.location.href = "/login";
+        } else if (isTimeoutError(error)) {
+            // Handle timeout - show retry button
+            console.error(`Request timed out after ${error.timeoutMs}ms`);
+        } else if (isUnknownError(error)) {
+            // Handle other errors
+            console.error(`Request failed: ${error.details}`);
+        }
+    }
+}
+```
+
+Or with `useRequest`:
+
+```tsx
+import { 
+    useRequest,
+    isUnauthorizedError,
+    isTimeoutError,
+} from "react-fetch-utils";
+
+export function MyComponent() {
+    const { status, error, response } = useRequest(() =>
+        FetchPromise({ url: "/api/data", method: "GET" })
+    );
+
+    if (error) {
+        if (isUnauthorizedError(error)) {
+            return <p>Please log in again</p>;
+        }
+        if (isTimeoutError(error)) {
+            return <p>Request timed out. Please try again.</p>;
+        }
+        return <p>Error: {String(error.details)}</p>;
+    }
+
+    // ... rest of component
+}
+```
 
 ## Troubleshooting
 

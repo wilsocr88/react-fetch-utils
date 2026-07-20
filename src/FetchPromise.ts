@@ -22,6 +22,10 @@ export interface FetchPromiseParams {
     onRequest?: (
         request: FetchRequestConfig
     ) => FetchRequestConfig | void | Promise<FetchRequestConfig | void>;
+    /** Intercept and transform successful response before resolving */
+    onResponse?: (
+        response: FetchResponseConfig
+    ) => unknown | Promise<unknown>;
     /** Custom status validation. Return true to treat as success */
     validateStatus?: (status: number, response: Response) => boolean;
     /** Async function to retrieve auth token for Authorization header */
@@ -40,19 +44,60 @@ export interface FetchRequestConfig {
     headers: Headers;
 }
 
-/** Error object returned when FetchPromise rejects */
-export interface FetchPromiseError {
-    /** Error category: 'Unauthorized' (401), 'Timeout' (request exceeded timeoutMs), or 'Unknown' */
-    reason: "Unauthorized" | "Timeout" | "Unknown";
-    /** Error details (status info, parsed error response, etc.) */
+/** Response config object passed to onResponse interceptor */
+export interface FetchResponseConfig {
+    /** HTTP status code */
+    status: number;
+    /** Response headers */
+    headers: Headers;
+    /** Parsed or raw response data (format depends on parseAs mode) */
+    data: unknown;
+    /** Original fetch Response object */
+    response: Response;
+}
+
+/** Error when request is rejected with 401 Unauthorized */
+export interface UnauthorizedError {
+    /** Error type marker */
+    reason: "Unauthorized";
+    /** HTTP status code (always 401) */
+    status: 401;
+    /** Response object from the 401 response */
+    response: Response;
+    /** Details about the response */
     details: unknown;
+    /** Original error if any */
+    originalError?: unknown;
+}
+
+/** Error when request times out */
+export interface TimeoutError {
+    /** Error type marker */
+    reason: "Timeout";
+    /** Configured timeout duration in milliseconds */
+    timeoutMs?: number;
+    /** Details about the timeout (includes the abort error) */
+    details: unknown;
+    /** Original AbortError from fetch */
+    originalError: unknown;
+}
+
+/** Error for all other failures (network, parsing, validation, etc.) */
+export interface UnknownError {
+    /** Error type marker */
+    reason: "Unknown";
     /** HTTP status code if available */
     status?: number;
     /** Response object if available */
     response?: Response;
-    /** Original error thrown by fetch or timeout handler */
+    /** Error details (error info, parsed error response, etc.) */
+    details: unknown;
+    /** Original error thrown by fetch or validation */
     originalError?: unknown;
 }
+
+/** Discriminated union of all possible error types */
+export type FetchPromiseError = UnauthorizedError | TimeoutError | UnknownError;
 
 /** Default configuration for all requests made by a FetchClient instance */
 export type FetchClientDefaults = Omit<FetchPromiseParams, "url" | "method"> & {
@@ -250,7 +295,12 @@ const FetchPromise = <T = unknown>(params: FetchPromiseParams): CancellablePromi
             });
 
             if (response.status === 401) {
-                reject({ reason: "Unauthorized", details: response, status: 401, response } satisfies FetchPromiseError);
+                reject({
+                    reason: "Unauthorized",
+                    status: 401,
+                    response,
+                    details: response,
+                } satisfies UnauthorizedError);
                 return;
             }
 
@@ -268,36 +318,43 @@ const FetchPromise = <T = unknown>(params: FetchPromiseParams): CancellablePromi
                     },
                     status: response.status,
                     response,
-                } satisfies FetchPromiseError);
+                } satisfies UnknownError);
                 return;
             }
 
+            let responseData: unknown;
             if (parseAs === "response") {
-                resolve(response as T);
-                return;
+                responseData = response;
+            } else if (parseAs === "raw") {
+                responseData = await response.blob();
+            } else if (parseAs === "text") {
+                responseData = await response.text();
+            } else {
+                responseData = await parseJsonSafely<T>(response);
             }
 
-            if (parseAs === "raw") {
-                resolve((await response.blob()) as unknown as T);
-                return;
+            if (params.onResponse) {
+                const interceptedData = await params.onResponse({
+                    status: response.status,
+                    headers: response.headers,
+                    data: responseData,
+                    response,
+                });
+                responseData = interceptedData;
             }
 
-            if (parseAs === "text") {
-                resolve((await response.text()) as unknown as T);
-                return;
-            }
-
-            resolve(await parseJsonSafely<T>(response));
+            resolve(responseData as T);
         } catch (error) {
             if (timedOut && (error as { name?: string } | null)?.name === "AbortError") {
                 reject({
                     reason: "Timeout",
+                    timeoutMs: params.timeoutMs,
                     details: {
                         timeoutMs: params.timeoutMs,
                         abortError: normalizeErrorDetails(error),
                     },
                     originalError: error,
-                } satisfies FetchPromiseError);
+                } satisfies TimeoutError);
                 return;
             }
 
@@ -305,7 +362,7 @@ const FetchPromise = <T = unknown>(params: FetchPromiseParams): CancellablePromi
                 reason: "Unknown",
                 details: normalizeErrorDetails(error),
                 originalError: error,
-            } satisfies FetchPromiseError);
+            } satisfies UnknownError);
         } finally {
             if (timeoutId) {
                 clearTimeout(timeoutId);
@@ -350,6 +407,8 @@ export const createFetchClient = (defaults: FetchClientDefaults = {}) => {
     return <T = unknown>(params: FetchPromiseParams): CancellablePromise<T> => {
         const runDefaultOnRequest = defaults.onRequest;
         const runParamOnRequest = params.onRequest;
+        const runDefaultOnResponse = defaults.onResponse;
+        const runParamOnResponse = params.onResponse;
 
         return FetchPromise<T>({
             ...defaults,
@@ -372,10 +431,35 @@ export const createFetchClient = (defaults: FetchClientDefaults = {}) => {
                 }
                 return nextRequest;
             },
+            onResponse: async response => {
+                let nextData = response.data;
+                if (runDefaultOnResponse) {
+                    nextData = await runDefaultOnResponse(response);
+                }
+                if (runParamOnResponse) {
+                    nextData = await runParamOnResponse({ ...response, data: nextData });
+                }
+                return nextData;
+            },
             validateStatus: params.validateStatus ?? defaults.validateStatus,
             getAuthToken: params.getAuthToken ?? defaults.getAuthToken,
         });
     };
+};
+
+/** Type guard to check if error is UnauthorizedError */
+export const isUnauthorizedError = (error: unknown): error is UnauthorizedError => {
+    return typeof error === "object" && error !== null && (error as any).reason === "Unauthorized";
+};
+
+/** Type guard to check if error is TimeoutError */
+export const isTimeoutError = (error: unknown): error is TimeoutError => {
+    return typeof error === "object" && error !== null && (error as any).reason === "Timeout";
+};
+
+/** Type guard to check if error is UnknownError */
+export const isUnknownError = (error: unknown): error is UnknownError => {
+    return typeof error === "object" && error !== null && (error as any).reason === "Unknown";
 };
 
 export default FetchPromise;

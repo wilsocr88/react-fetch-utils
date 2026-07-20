@@ -20,6 +20,8 @@ interface FetchPromiseParams {
     parseAs?: "json" | "raw" | "text" | "response";
     /** Intercept and modify request config before sending */
     onRequest?: (request: FetchRequestConfig) => FetchRequestConfig | void | Promise<FetchRequestConfig | void>;
+    /** Intercept and transform successful response before resolving */
+    onResponse?: (response: FetchResponseConfig) => unknown | Promise<unknown>;
     /** Custom status validation. Return true to treat as success */
     validateStatus?: (status: number, response: Response) => boolean;
     /** Async function to retrieve auth token for Authorization header */
@@ -36,19 +38,56 @@ interface FetchRequestConfig {
     /** Headers object for inspection/modification */
     headers: Headers;
 }
-/** Error object returned when FetchPromise rejects */
-interface FetchPromiseError {
-    /** Error category: 'Unauthorized' (401), 'Timeout' (request exceeded timeoutMs), or 'Unknown' */
-    reason: "Unauthorized" | "Timeout" | "Unknown";
-    /** Error details (status info, parsed error response, etc.) */
+/** Response config object passed to onResponse interceptor */
+interface FetchResponseConfig {
+    /** HTTP status code */
+    status: number;
+    /** Response headers */
+    headers: Headers;
+    /** Parsed or raw response data (format depends on parseAs mode) */
+    data: unknown;
+    /** Original fetch Response object */
+    response: Response;
+}
+/** Error when request is rejected with 401 Unauthorized */
+interface UnauthorizedError {
+    /** Error type marker */
+    reason: "Unauthorized";
+    /** HTTP status code (always 401) */
+    status: 401;
+    /** Response object from the 401 response */
+    response: Response;
+    /** Details about the response */
     details: unknown;
+    /** Original error if any */
+    originalError?: unknown;
+}
+/** Error when request times out */
+interface TimeoutError {
+    /** Error type marker */
+    reason: "Timeout";
+    /** Configured timeout duration in milliseconds */
+    timeoutMs?: number;
+    /** Details about the timeout (includes the abort error) */
+    details: unknown;
+    /** Original AbortError from fetch */
+    originalError: unknown;
+}
+/** Error for all other failures (network, parsing, validation, etc.) */
+interface UnknownError {
+    /** Error type marker */
+    reason: "Unknown";
     /** HTTP status code if available */
     status?: number;
     /** Response object if available */
     response?: Response;
-    /** Original error thrown by fetch or timeout handler */
+    /** Error details (error info, parsed error response, etc.) */
+    details: unknown;
+    /** Original error thrown by fetch or validation */
     originalError?: unknown;
 }
+/** Discriminated union of all possible error types */
+type FetchPromiseError = UnauthorizedError | TimeoutError | UnknownError;
 /** Default configuration for all requests made by a FetchClient instance */
 type FetchClientDefaults = Omit<FetchPromiseParams, "url" | "method"> & {
     /** Default HTTP method (can be overridden per request) */
@@ -112,7 +151,34 @@ declare const FetchPromise: <T = unknown>(params: FetchPromiseParams) => Cancell
  * ```
  */
 declare const createFetchClient: (defaults?: FetchClientDefaults) => <T = unknown>(params: FetchPromiseParams) => CancellablePromise<T>;
+/** Type guard to check if error is UnauthorizedError */
+declare const isUnauthorizedError: (error: unknown) => error is UnauthorizedError;
+/** Type guard to check if error is TimeoutError */
+declare const isTimeoutError: (error: unknown) => error is TimeoutError;
+/** Type guard to check if error is UnknownError */
+declare const isUnknownError: (error: unknown) => error is UnknownError;
 
+/**
+ * Status of a tracked query
+ */
+type QueryStatus = "idle" | "loading" | "success" | "error";
+/**
+ * Result object from useQueries hook
+ */
+type UseQueriesResult = {
+    /** Array of currently tracked queries */
+    list: CancellablePromise[];
+    /** Cancel all tracked queries and clear the list */
+    cancelAll: () => void;
+    /** Add a query to the tracked list */
+    add: (query: CancellablePromise) => void;
+    /** Remove a query from the tracked list */
+    remove: (query: CancellablePromise) => void;
+    /** Get aggregated status: 'idle' (empty), 'loading' (any loading), 'error' (any error), 'success' (all done) */
+    getStatus: () => QueryStatus;
+    /** Refetch all queries (re-execute all stored promises) */
+    refetchAll: (queries: (() => CancellablePromise)[]) => void;
+};
 /**
  * React hook for managing a collection of in-flight requests.
  *
@@ -135,18 +201,14 @@ declare const createFetchClient: (defaults?: FetchClientDefaults) => <T = unknow
  *   queries.cancelAll();
  * };
  *
+ * const status = queries.getStatus(); // 'loading', 'success', 'error', or 'idle'
+ *
  * useEffect(() => {
  *   return () => queries.cancelAll(); // Clean up on unmount
  * }, [queries]);
  * ```
  */
-declare function useQueries(): {
-    /** Array of currently tracked queries */
-    list: CancellablePromise<unknown>[];
-    cancelAll: () => void;
-    add: (query: CancellablePromise) => void;
-    remove: (query: CancellablePromise) => void;
-};
+declare function useQueries(): UseQueriesResult;
 
 /**
  * Status enumerator for reverse lookup.
@@ -232,4 +294,4 @@ type UseRequestResult<T> = {
  */
 declare const useRequest: <T = unknown>(fetchPromise: (() => CancellablePromise<T>) | null | undefined, disableCacheOrOptions?: boolean | UseRequestOptions) => UseRequestResult<T>;
 
-export { type CancellablePromise, type FetchClientDefaults, FetchPromise, type FetchPromiseError, type FetchPromiseParams, type FetchRequestConfig, STATUS, type Status, type UseRequestOptions, type UseRequestResult, createFetchClient, statusEnum, useQueries, useRequest };
+export { type CancellablePromise, type FetchClientDefaults, FetchPromise, type FetchPromiseError, type FetchPromiseParams, type FetchRequestConfig, type FetchResponseConfig, STATUS, type Status, type TimeoutError, type UnauthorizedError, type UnknownError, type UseRequestOptions, type UseRequestResult, createFetchClient, isTimeoutError, isUnauthorizedError, isUnknownError, statusEnum, useQueries, useRequest };

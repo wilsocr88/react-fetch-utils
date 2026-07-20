@@ -40,6 +40,9 @@ __export(index_exports, {
   FetchPromise: () => FetchPromise_default,
   STATUS: () => STATUS,
   createFetchClient: () => createFetchClient,
+  isTimeoutError: () => isTimeoutError,
+  isUnauthorizedError: () => isUnauthorizedError,
+  isUnknownError: () => isUnknownError,
   statusEnum: () => statusEnum,
   useQueries: () => useQueries,
   useRequest: () => useRequest
@@ -173,7 +176,12 @@ var FetchPromise = (params) => {
         headers: requestConfig.headers
       }));
       if (response.status === 401) {
-        reject({ reason: "Unauthorized", details: response, status: 401, response });
+        reject({
+          reason: "Unauthorized",
+          status: 401,
+          response,
+          details: response
+        });
         return;
       }
       const isValid = params.validateStatus ? params.validateStatus(response.status, response) : response.ok;
@@ -190,23 +198,31 @@ var FetchPromise = (params) => {
         });
         return;
       }
+      let responseData;
       if (parseAs === "response") {
-        resolve(response);
-        return;
+        responseData = response;
+      } else if (parseAs === "raw") {
+        responseData = await response.blob();
+      } else if (parseAs === "text") {
+        responseData = await response.text();
+      } else {
+        responseData = await parseJsonSafely(response);
       }
-      if (parseAs === "raw") {
-        resolve(await response.blob());
-        return;
+      if (params.onResponse) {
+        const interceptedData = await params.onResponse({
+          status: response.status,
+          headers: response.headers,
+          data: responseData,
+          response
+        });
+        responseData = interceptedData;
       }
-      if (parseAs === "text") {
-        resolve(await response.text());
-        return;
-      }
-      resolve(await parseJsonSafely(response));
+      resolve(responseData);
     } catch (error) {
       if (timedOut && (error == null ? void 0 : error.name) === "AbortError") {
         reject({
           reason: "Timeout",
+          timeoutMs: params.timeoutMs,
           details: {
             timeoutMs: params.timeoutMs,
             abortError: normalizeErrorDetails(error)
@@ -238,6 +254,8 @@ var createFetchClient = (defaults = {}) => {
     var _a, _b, _c, _d;
     const runDefaultOnRequest = defaults.onRequest;
     const runParamOnRequest = params.onRequest;
+    const runDefaultOnResponse = defaults.onResponse;
+    const runParamOnResponse = params.onResponse;
     return FetchPromise(__spreadProps(__spreadValues(__spreadValues({}, defaults), params), {
       method: (_b = (_a = params.method) != null ? _a : defaults.method) != null ? _b : "GET",
       headers: mergeHeaders(defaults.headers, params.headers),
@@ -257,10 +275,29 @@ var createFetchClient = (defaults = {}) => {
         }
         return nextRequest;
       },
+      onResponse: async (response) => {
+        let nextData = response.data;
+        if (runDefaultOnResponse) {
+          nextData = await runDefaultOnResponse(response);
+        }
+        if (runParamOnResponse) {
+          nextData = await runParamOnResponse(__spreadProps(__spreadValues({}, response), { data: nextData }));
+        }
+        return nextData;
+      },
       validateStatus: (_c = params.validateStatus) != null ? _c : defaults.validateStatus,
       getAuthToken: (_d = params.getAuthToken) != null ? _d : defaults.getAuthToken
     }));
   };
+};
+var isUnauthorizedError = (error) => {
+  return typeof error === "object" && error !== null && error.reason === "Unauthorized";
+};
+var isTimeoutError = (error) => {
+  return typeof error === "object" && error !== null && error.reason === "Timeout";
+};
+var isUnknownError = (error) => {
+  return typeof error === "object" && error !== null && error.reason === "Unknown";
 };
 var FetchPromise_default = FetchPromise;
 
@@ -269,6 +306,7 @@ var import_react = require("react");
 function useQueries() {
   const listRef = (0, import_react.useRef)([]);
   const [list, setList] = (0, import_react.useState)([]);
+  const statusMapRef = (0, import_react.useRef)(/* @__PURE__ */ new Map());
   const syncList = (0, import_react.useCallback)(() => {
     setList([...listRef.current]);
   }, []);
@@ -276,11 +314,18 @@ function useQueries() {
     if (listRef.current.length === 0) return;
     listRef.current.forEach((query) => query.cancel());
     listRef.current = [];
+    statusMapRef.current.clear();
     syncList();
   }, [syncList]);
   const add = (0, import_react.useCallback)(
     (query) => {
       listRef.current = [...listRef.current, query];
+      statusMapRef.current.set(query, "loading");
+      query.then(() => {
+        statusMapRef.current.set(query, "success");
+      }).catch(() => {
+        statusMapRef.current.set(query, "error");
+      });
       syncList();
     },
     [syncList]
@@ -288,16 +333,35 @@ function useQueries() {
   const remove = (0, import_react.useCallback)(
     (query) => {
       listRef.current = listRef.current.filter((activeQuery) => activeQuery !== query);
+      statusMapRef.current.delete(query);
       syncList();
     },
     [syncList]
   );
+  const getStatus = (0, import_react.useCallback)(() => {
+    if (listRef.current.length === 0) return "idle";
+    const statuses = Array.from(statusMapRef.current.values());
+    if (statuses.some((s) => s === "loading")) return "loading";
+    if (statuses.some((s) => s === "error")) return "error";
+    return "success";
+  }, []);
+  const refetchAll = (0, import_react.useCallback)(
+    (queries) => {
+      cancelAll();
+      queries.forEach((factory) => {
+        const newQuery = factory();
+        add(newQuery);
+      });
+    },
+    [add, cancelAll]
+  );
   return {
-    /** Array of currently tracked queries */
     list,
     cancelAll,
     add,
-    remove
+    remove,
+    getStatus,
+    refetchAll
   };
 }
 
@@ -462,6 +526,9 @@ var useRequest = (fetchPromise, disableCacheOrOptions = false) => {
   FetchPromise,
   STATUS,
   createFetchClient,
+  isTimeoutError,
+  isUnauthorizedError,
+  isUnknownError,
   statusEnum,
   useQueries,
   useRequest

@@ -145,7 +145,12 @@ var FetchPromise = (params) => {
         headers: requestConfig.headers
       }));
       if (response.status === 401) {
-        reject({ reason: "Unauthorized", details: response, status: 401, response });
+        reject({
+          reason: "Unauthorized",
+          status: 401,
+          response,
+          details: response
+        });
         return;
       }
       const isValid = params.validateStatus ? params.validateStatus(response.status, response) : response.ok;
@@ -162,23 +167,31 @@ var FetchPromise = (params) => {
         });
         return;
       }
+      let responseData;
       if (parseAs === "response") {
-        resolve(response);
-        return;
+        responseData = response;
+      } else if (parseAs === "raw") {
+        responseData = await response.blob();
+      } else if (parseAs === "text") {
+        responseData = await response.text();
+      } else {
+        responseData = await parseJsonSafely(response);
       }
-      if (parseAs === "raw") {
-        resolve(await response.blob());
-        return;
+      if (params.onResponse) {
+        const interceptedData = await params.onResponse({
+          status: response.status,
+          headers: response.headers,
+          data: responseData,
+          response
+        });
+        responseData = interceptedData;
       }
-      if (parseAs === "text") {
-        resolve(await response.text());
-        return;
-      }
-      resolve(await parseJsonSafely(response));
+      resolve(responseData);
     } catch (error) {
       if (timedOut && (error == null ? void 0 : error.name) === "AbortError") {
         reject({
           reason: "Timeout",
+          timeoutMs: params.timeoutMs,
           details: {
             timeoutMs: params.timeoutMs,
             abortError: normalizeErrorDetails(error)
@@ -210,6 +223,8 @@ var createFetchClient = (defaults = {}) => {
     var _a, _b, _c, _d;
     const runDefaultOnRequest = defaults.onRequest;
     const runParamOnRequest = params.onRequest;
+    const runDefaultOnResponse = defaults.onResponse;
+    const runParamOnResponse = params.onResponse;
     return FetchPromise(__spreadProps(__spreadValues(__spreadValues({}, defaults), params), {
       method: (_b = (_a = params.method) != null ? _a : defaults.method) != null ? _b : "GET",
       headers: mergeHeaders(defaults.headers, params.headers),
@@ -229,10 +244,29 @@ var createFetchClient = (defaults = {}) => {
         }
         return nextRequest;
       },
+      onResponse: async (response) => {
+        let nextData = response.data;
+        if (runDefaultOnResponse) {
+          nextData = await runDefaultOnResponse(response);
+        }
+        if (runParamOnResponse) {
+          nextData = await runParamOnResponse(__spreadProps(__spreadValues({}, response), { data: nextData }));
+        }
+        return nextData;
+      },
       validateStatus: (_c = params.validateStatus) != null ? _c : defaults.validateStatus,
       getAuthToken: (_d = params.getAuthToken) != null ? _d : defaults.getAuthToken
     }));
   };
+};
+var isUnauthorizedError = (error) => {
+  return typeof error === "object" && error !== null && error.reason === "Unauthorized";
+};
+var isTimeoutError = (error) => {
+  return typeof error === "object" && error !== null && error.reason === "Timeout";
+};
+var isUnknownError = (error) => {
+  return typeof error === "object" && error !== null && error.reason === "Unknown";
 };
 var FetchPromise_default = FetchPromise;
 
@@ -241,6 +275,7 @@ import { useCallback, useRef, useState } from "react";
 function useQueries() {
   const listRef = useRef([]);
   const [list, setList] = useState([]);
+  const statusMapRef = useRef(/* @__PURE__ */ new Map());
   const syncList = useCallback(() => {
     setList([...listRef.current]);
   }, []);
@@ -248,11 +283,18 @@ function useQueries() {
     if (listRef.current.length === 0) return;
     listRef.current.forEach((query) => query.cancel());
     listRef.current = [];
+    statusMapRef.current.clear();
     syncList();
   }, [syncList]);
   const add = useCallback(
     (query) => {
       listRef.current = [...listRef.current, query];
+      statusMapRef.current.set(query, "loading");
+      query.then(() => {
+        statusMapRef.current.set(query, "success");
+      }).catch(() => {
+        statusMapRef.current.set(query, "error");
+      });
       syncList();
     },
     [syncList]
@@ -260,16 +302,35 @@ function useQueries() {
   const remove = useCallback(
     (query) => {
       listRef.current = listRef.current.filter((activeQuery) => activeQuery !== query);
+      statusMapRef.current.delete(query);
       syncList();
     },
     [syncList]
   );
+  const getStatus = useCallback(() => {
+    if (listRef.current.length === 0) return "idle";
+    const statuses = Array.from(statusMapRef.current.values());
+    if (statuses.some((s) => s === "loading")) return "loading";
+    if (statuses.some((s) => s === "error")) return "error";
+    return "success";
+  }, []);
+  const refetchAll = useCallback(
+    (queries) => {
+      cancelAll();
+      queries.forEach((factory) => {
+        const newQuery = factory();
+        add(newQuery);
+      });
+    },
+    [add, cancelAll]
+  );
   return {
-    /** Array of currently tracked queries */
     list,
     cancelAll,
     add,
-    remove
+    remove,
+    getStatus,
+    refetchAll
   };
 }
 
@@ -433,6 +494,9 @@ export {
   FetchPromise_default as FetchPromise,
   STATUS,
   createFetchClient,
+  isTimeoutError,
+  isUnauthorizedError,
+  isUnknownError,
   statusEnum,
   useQueries,
   useRequest
